@@ -1851,105 +1851,6 @@ static const mp_limb base_limit[34*2] = {
 #endif
 };
 
-/*
- * Divide-and-conquer decimal string conversion.
- * For numbers with > DC_GET_STR_THRESHOLD digits, this is O(n log^2 n)
- * instead of O(n^2) for the simple algorithm.
- */
-#define DC_GET_STR_THRESHOLD 700
-
-/*
- * Scratch buffer for D&C get_str to avoid repeated allocations.
- * Contains preallocated work areas that are resized as needed.
- *
- * The lo_stack provides a separate buffer for each recursion depth,
- * preventing overwrites between parent and child calls. Each entry
- * is allocated on first use with appropriate size for that depth.
- */
-#define DC_MAX_DEPTH 32  /* Covers up to 2^32 * 1000 digits */
-
-typedef struct {
-  mpz_t lo_stack[DC_MAX_DEPTH]; /* Depth-indexed lo buffers */
-  mrb_bool lo_init[DC_MAX_DEPTH]; /* Initialized flags per depth */
-  mpz_t q5;       /* Quotient from division by 5^k */
-  mpz_t r5;       /* Remainder from division by 5^k */
-  mpz_t q5_low;   /* Low bits of q5 for mod 2^k */
-  mpz_t tmp;      /* Temporary for base case (in-place division) */
-  mrb_bool initialized;
-} dc_get_str_scratch_t;
-
-static void
-dc_scratch_init(mpz_ctx_t *ctx, dc_get_str_scratch_t *scratch, size_t max_limbs)
-{
-  if (scratch->initialized) return;
-
-  /* lo_stack entries are initialized on demand per depth, not here */
-  for (size_t i = 0; i < DC_MAX_DEPTH; i++) {
-    scratch->lo_init[i] = FALSE;
-  }
-
-  /* Preallocate other scratch buffers with estimated sizes */
-  mpz_init_heap(ctx, &scratch->q5, max_limbs);
-  mpz_init_heap(ctx, &scratch->r5, max_limbs);
-  mpz_init_heap(ctx, &scratch->q5_low, max_limbs);
-  mpz_init_heap(ctx, &scratch->tmp, max_limbs);
-  scratch->initialized = TRUE;
-}
-
-static void
-dc_scratch_clear(mpz_ctx_t *ctx, dc_get_str_scratch_t *scratch)
-{
-  if (!scratch->initialized) return;
-
-  /* Clear lo_stack entries that were initialized */
-  for (size_t i = 0; i < DC_MAX_DEPTH; i++) {
-    if (scratch->lo_init[i]) {
-      mpz_clear(ctx, &scratch->lo_stack[i]);
-    }
-  }
-
-  mpz_clear(ctx, &scratch->q5);
-  mpz_clear(ctx, &scratch->r5);
-  mpz_clear(ctx, &scratch->q5_low);
-  mpz_clear(ctx, &scratch->tmp);
-  scratch->initialized = FALSE;
-}
-
-/*
- * Recursive D&C conversion helper.
- * Converts x to decimal string, writing exactly num_digits characters.
- * The caller must ensure num_digits >= actual digits in x.
- * Leading zeros are added if x has fewer digits than num_digits.
- */
-/* Batch divisor for extracting multiple digits at once */
-#ifdef MRB_NO_MPZ64BIT
-/* 16-bit limbs: 10^4 fits in 16 bits */
-#define BATCH_DIVISOR 10000UL
-#define BATCH_DIGITS 4
-#else
-/* 32-bit limbs: 10^9 fits in 32 bits */
-#define BATCH_DIVISOR 1000000000UL
-#define BATCH_DIGITS 9
-#endif
-
-/*
- * Divide limb array by BATCH_DIVISOR in place, returning remainder.
- * Used for extracting BATCH_DIGITS decimal digits at a time.
- * Compilers optimize constant division to multiplication+shift.
- */
-static inline mp_limb
-mpn_div_batch(mp_limb *p, size_t sz)
-{
-  mp_dbl_limb rem = 0;
-  for (size_t i = sz; i > 0; i--) {
-    mp_dbl_limb n = (rem << DIG_SIZE) | p[i-1];
-    mp_dbl_limb q = n / BATCH_DIVISOR;
-    rem = n - q * BATCH_DIVISOR;
-    p[i-1] = (mp_limb)q;
-  }
-  return (mp_limb)rem;
-}
-
 /* Lookup table for fast 2-digit conversion (Lemire's small table technique) */
 static const char digit_pairs[] =
   "00010203040506070809"
@@ -1962,295 +1863,6 @@ static const char digit_pairs[] =
   "70717273747576777879"
   "80818283848586878889"
   "90919293949596979899";
-
-static void
-mpz_get_str_dc_recur(mpz_ctx_t *ctx, char *s, mpz_t *x, size_t num_digits,
-                  mpz_t *pow5, size_t num_powers, size_t depth,
-                  dc_get_str_scratch_t *scratch)
-{
-  /* Base case: use simple conversion for small numbers */
-  if (num_digits <= DC_GET_STR_THRESHOLD || num_powers == 0) {
-    /* Convert to string in reverse order using batch extraction */
-    size_t pos = num_digits;
-
-    /* Use scratch buffer for working copy */
-    mpz_t *tmp = &scratch->tmp;
-
-    /* Ensure tmp has enough capacity and copy x */
-    mpz_realloc(ctx, tmp, x->sz);
-    mpz_set(ctx, tmp, x);
-
-    while (pos > 0 && !zero_p(tmp)) {
-      /* Divide by BATCH_DIVISOR in place, get remainder as BATCH_DIGITS digits */
-      mp_limb batch = mpn_div_batch(tmp->p, tmp->sz);
-      trim(tmp);
-
-      /* Convert remainder to BATCH_DIGITS digits using table lookup */
-#if (BATCH_DIGITS % 2) == 1
-      /* Extract last digit separately since BATCH_DIGITS is odd */
-      if (pos > 0) {
-        s[--pos] = '0' + (char)(batch % 10);
-        batch /= 10;
-      }
-#endif
-      /* Extract remaining digits as pairs using lookup table */
-      for (int d = 0; d < BATCH_DIGITS / 2 && pos >= 2; d++) {
-        mp_limb pair = batch % 100;
-        batch /= 100;
-        s[--pos] = digit_pairs[pair * 2 + 1];
-        s[--pos] = digit_pairs[pair * 2];
-      }
-      /* Extract any remaining single digit when pos == 1 */
-      if (pos > 0 && batch > 0) {
-        s[--pos] = '0' + (char)(batch % 10);
-      }
-    }
-
-    /* Fill remaining positions with zeros */
-    while (pos > 0) {
-      s[--pos] = '0';
-    }
-
-    return;
-  }
-
-  /* Find appropriate power of 10 to split on */
-  /* We want the largest power that gives roughly half the digits */
-  size_t split_idx = 0;
-  size_t split_digits = 1;
-  for (size_t i = 0; i < num_powers; i++) {
-    size_t d = (size_t)1 << i;  /* digits for this power */
-    if (d * 2 <= num_digits) {
-      split_idx = i;
-      split_digits = d;
-    }
-  }
-
-  /*
-   * Optimization: Use the factorization 10^k = 2^k * 5^k
-   *
-   * Instead of dividing by 10^k directly:
-   * 1. Divide by 5^k (smaller divisor = faster division)
-   * 2. Use bit operations to handle the 2^k part
-   *
-   * If x = hi * 10^k + lo, and we compute q5 = x / 5^k, r5 = x % 5^k:
-   *   hi = q5 >> k  (right shift by k bits)
-   *   lo = (q5 & ((1<<k)-1)) * 5^k + r5
-   */
-
-  /* Reuse scratch buffers: q5, r5, q5_low */
-  mpz_t *q5 = &scratch->q5;
-  mpz_t *r5 = &scratch->r5;
-  mpz_t *q5_low = &scratch->q5_low;
-
-  /* Step 1: Divide by 5^k (cheaper than dividing by 10^k) */
-  mpz_mdivmod(ctx, q5, r5, x, &pow5[split_idx]);
-  r5->sn = (r5->sn < 0) ? -r5->sn : r5->sn;
-
-  /* Step 2: Extract q5_low = q5 mod 2^k BEFORE modifying q5 */
-  mpz_mod_2exp(ctx, q5_low, q5, (mrb_int)split_digits);
-
-  /* Step 3: hi = q5 >> k - shift q5 in place to reuse as hi */
-  /* This avoids allocating a separate hi buffer */
-  mpz_t *hi = q5;  /* Reuse q5 as hi after shifting */
-  {
-    size_t limb_shift = split_digits / DIG_SIZE;
-    size_t bit_shift = split_digits % DIG_SIZE;
-
-    if (limb_shift >= q5->sz) {
-      zero(q5);
-    }
-    else {
-      size_t new_sz = q5->sz - limb_shift;
-      /* Shift limbs down */
-      memmove(q5->p, q5->p + limb_shift, new_sz * sizeof(mp_limb));
-      q5->sz = new_sz;
-      /* Apply bit shift if needed */
-      if (bit_shift > 0) {
-        mpn_rshift(q5->p, q5->p, q5->sz, (unsigned int)bit_shift);
-      }
-      trim(q5);
-    }
-  }
-
-  /* Step 4: lo = q5_low * 5^k + r5 - use depth-indexed lo buffer */
-  if (depth >= DC_MAX_DEPTH) {
-    /* Fallback: allocate fresh if depth exceeds limit (shouldn't happen) */
-    mpz_t lo;
-    mpz_init(ctx, &lo);
-    mpz_mul(ctx, &lo, q5_low, &pow5[split_idx]);
-    mpz_add(ctx, &lo, &lo, r5);
-    lo.sn = (lo.sn < 0) ? -lo.sn : lo.sn;
-
-    size_t hi_digits = num_digits - split_digits;
-    mpz_get_str_dc_recur(ctx, s, hi, hi_digits, pow5, split_idx, depth + 1, scratch);
-    mpz_get_str_dc_recur(ctx, s + hi_digits, &lo, split_digits, pow5, split_idx, depth + 1, scratch);
-    mpz_clear(ctx, &lo);
-    return;
-  }
-
-  /* Initialize lo_stack[depth] on first use at this depth */
-  mpz_t *lo = &scratch->lo_stack[depth];
-  if (!scratch->lo_init[depth]) {
-    /* Allocate with appropriate size for this depth level */
-    /* At depth d, lo is roughly x->sz / 2^(d+1) limbs, plus some margin */
-    size_t est_limbs = (x->sz >> 1) + 2;
-    mpz_init_heap(ctx, lo, est_limbs);
-    scratch->lo_init[depth] = TRUE;
-  }
-
-  mpz_mul(ctx, lo, q5_low, &pow5[split_idx]);
-  mpz_add(ctx, lo, lo, r5);
-  lo->sn = (lo->sn < 0) ? -lo->sn : lo->sn;
-
-  /* Recursively convert high part (using q5 which now contains hi) */
-  size_t hi_digits = num_digits - split_digits;
-  mpz_get_str_dc_recur(ctx, s, hi, hi_digits, pow5, split_idx, depth + 1, scratch);
-
-  /* Recursively convert low part (exactly split_digits digits with padding) */
-  mpz_get_str_dc_recur(ctx, s + hi_digits, lo, split_digits, pow5, split_idx, depth + 1, scratch);
-}
-
-/*
- * D&C decimal string conversion entry point.
- * Returns pointer to start of string (after optional sign).
- *
- * Optimization: Uses 10^k = 2^k * 5^k factorization.
- * Dividing by 5^k is ~30% faster than dividing by 10^k because
- * 5^k has fewer bits (2.32k vs 3.32k). The 2^k part is handled
- * with fast bit shifts.
- */
-#define MAX_POWERS 64
-
-struct mpz_get_str_dc_data {
-  mpz_ctx_t *ctx;
-  char *s;          /* output buffer (after sign) */
-  mpz_t *x;
-  size_t num_digits;
-  mpz_t pow5[MAX_POWERS];
-  mpz_t tmp;
-  dc_get_str_scratch_t scratch;
-  size_t num_powers; /* cleanup target count */
-};
-
-static mrb_value
-mpz_get_str_dc_body(mrb_state *mrb, void *userdata)
-{
-  struct mpz_get_str_dc_data *d = (struct mpz_get_str_dc_data *)userdata;
-  mpz_ctx_t *ctx = d->ctx;
-  char *s = d->s;
-  mpz_t *x = d->x;
-  size_t num_digits = d->num_digits;
-
-  /* 5^1 */
-  mpz_init(ctx, &d->pow5[0]);
-  mpz_set_int(ctx, &d->pow5[0], 5);
-  d->num_powers = 1;
-
-  /* Build powers by squaring: 5^(2^k) = (5^(2^(k-1)))^2 */
-  while (d->num_powers < MAX_POWERS) {
-    size_t power_digits = (size_t)1 << d->num_powers;
-    if (power_digits > num_digits) break;
-
-    mpz_init(ctx, &d->pow5[d->num_powers]);
-    mpz_sqr(ctx, &d->pow5[d->num_powers], &d->pow5[d->num_powers - 1]);
-    d->num_powers++;
-  }
-
-  /* Make a copy of x for conversion (to preserve original) */
-  mpz_init_set(ctx, &d->tmp, x);
-  d->tmp.sn = 1;  /* Work with absolute value */
-
-  /* Initialize scratch buffers for base case optimization */
-  dc_scratch_init(ctx, &d->scratch, x->sz);
-
-  /* Do the recursive conversion (starting at depth 0) */
-  mpz_get_str_dc_recur(ctx, s, &d->tmp, num_digits, d->pow5, d->num_powers, 0, &d->scratch);
-
-  /* Null-terminate the string */
-  s[num_digits] = '\0';
-
-  return mrb_nil_value();
-}
-
-static char*
-mpz_get_str_dc(mpz_ctx_t *ctx, char *s, mpz_t *x)
-{
-  /* Handle sign */
-  char *result = s;
-  if (x->sn < 0) {
-    *s++ = '-';
-  }
-
-  /* Calculate number of decimal digits needed */
-  /* Use log10(2) ≈ 0.30103, so bits * 0.30103 + 1 gives upper bound */
-  size_t bits = digits(x) * DIG_SIZE;
-  size_t num_digits = (size_t)(bits * 30103UL / 100000UL) + 2;
-
-  struct mpz_get_str_dc_data d;
-  memset(&d, 0, sizeof(d));
-  d.ctx = ctx;
-  d.s = s;
-  d.x = x;
-  d.num_digits = num_digits;
-  d.num_powers = 0;
-
-  mrb_value exc;
-  MRB_ENSURE(MPZ_MRB(ctx), exc, mpz_get_str_dc_body, &d) {
-    /* Cleanup always runs (mpz_clear is safe on zero-initialized mpz_t) */
-    for (size_t i = 0; i < d.num_powers; i++) {
-      mpz_clear(ctx, &d.pow5[i]);
-    }
-    mpz_clear(ctx, &d.tmp);
-    dc_scratch_clear(ctx, &d.scratch);
-  }
-
-  /* Remove leading zeros (but keep at least one digit) */
-  char *p = s;
-  while (*p == '0' && *(p+1) != '\0') p++;
-  if (p > s) {
-    memmove(s, p, strlen(p) + 1);
-  }
-
-  return result;
-}
-
-/*
- * CPython-style base conversion for decimal strings.
- *
- * Converts from base 2^DIG_SIZE to base 10^k (DECIMAL_BASE_CONV).
- * This is faster than repeated division because:
- * - Each input limb is processed only once (MSB to LSB)
- * - The inner loop multiplies/divides by constants (compiler optimizes)
- * - Fewer total operations than dividing entire number repeatedly
- *
- * Returns number of decimal base digits written to decimal_out.
- */
-static size_t
-mpz_base_convert_decimal(const mp_limb *limbs, size_t size, mp_limb *decimal_out)
-{
-  size_t decimal_size = 0;
-
-  /* Process input limbs from MSB to LSB */
-  for (size_t i = size; i > 0; i--) {
-    mp_limb hi = limbs[i - 1];
-
-    /* Multiply existing decimal digits by 2^DIG_SIZE and add hi */
-    for (size_t j = 0; j < decimal_size; j++) {
-      mp_dbl_limb z = ((mp_dbl_limb)decimal_out[j] << DIG_SIZE) | hi;
-      hi = (mp_limb)(z / DECIMAL_BASE_CONV);
-      decimal_out[j] = (mp_limb)(z - (mp_dbl_limb)hi * DECIMAL_BASE_CONV);
-    }
-
-    /* Handle remaining carries into new decimal digits */
-    while (hi) {
-      decimal_out[decimal_size++] = hi % DECIMAL_BASE_CONV;
-      hi /= DECIMAL_BASE_CONV;
-    }
-  }
-
-  return decimal_size;
-}
 
 /*
  * Parse decimal string into decimal-base array.
@@ -2439,60 +2051,39 @@ mpz_get_str(mpz_ctx_t *ctx, char *s, mrb_int sz, mrb_int base, mpz_t *x)
     if ((size_t)xlen > SIZE_MAX / sizeof(mp_limb)) {
       mrb_raise(mrb, E_RUNTIME_ERROR, "bigint size too large for string conversion");
     }
+    mp_limb *t = (mp_limb*)mrb_malloc(mrb, xlen * sizeof(mp_limb));
 
-    /* Use D&C algorithm for large base-10 numbers */
-    size_t est_digits = (size_t)(xlen * DIG_SIZE * 30103UL / 100000UL) + 2;
-    if (base == 10 && est_digits > DC_GET_STR_THRESHOLD) {
-      return mpz_get_str_dc(ctx, s, x);
-    }
+    mp_limb *tend = t + xlen;
+    memcpy(t, x->p, xlen * sizeof(mp_limb));
+    mp_limb b2 = base_limit[base-3];
 
-    if (base == 10) {
-      /* Use CPython-style base conversion for decimal (faster) */
-      size_t decimal_alloc = (size_t)xlen * 2 + 2;
-      mp_limb *decimal = (mp_limb*)mrb_malloc(mrb, decimal_alloc * sizeof(mp_limb));
-      memset(decimal, 0, decimal_alloc * sizeof(mp_limb));
-
-      size_t dsz = mpz_base_convert_decimal(x->p, (size_t)xlen, decimal);
-      s = mpz_decimal_to_str(decimal, dsz, s);
-
-      mrb_free(mrb, decimal);
-    }
-    else {
-      /* Use division-style for other bases */
-      mp_limb *t = (mp_limb*)mrb_malloc(mrb, xlen * sizeof(mp_limb));
-
-      mp_limb *tend = t + xlen;
-      memcpy(t, x->p, xlen * sizeof(mp_limb));
-      mp_limb b2 = base_limit[base-3];
-
-      for (;;) {
-        mp_limb *d = tend;
-        mp_dbl_limb a = 0;
-        while (--d >= t) {
-          mp_limb d0 = *d;
-          a = (a<<DIG_SIZE) | d0;
-          *d = (mp_limb)(a / b2);
-          a %= b2;
-        }
-
-        // convert to character
-        for (mp_limb b=b2; b>=base; b/=(mp_limb)base) {
-          char a0 = (char)(a % base);
-          if (a0 < 10) a0 += '0';
-          else a0 += 'a' - 10;
-          if (s == se) break;
-          *s++ = a0;
-          a /= base;
-        }
-
-        // check if number is zero
-        for (d = t; d < tend; d++) {
-          if (*d != 0) break;
-        }
-        if (d == tend) break;
+    for (;;) {
+      mp_limb *d = tend;
+      mp_dbl_limb a = 0;
+      while (--d >= t) {
+        mp_limb d0 = *d;
+        a = (a<<DIG_SIZE) | d0;
+        *d = (mp_limb)(a / b2);
+        a %= b2;
       }
-      mrb_free(mrb, t);
+
+      // convert to character
+      for (mp_limb b=b2; b>=base; b/=(mp_limb)base) {
+        char a0 = (char)(a % base);
+        if (a0 < 10) a0 += '0';
+        else a0 += 'a' - 10;
+        if (s == se) break;
+        *s++ = a0;
+        a /= base;
+      }
+
+      // check if number is zero
+      for (d = t; d < tend; d++) {
+        if (*d != 0) break;
+      }
+      if (d == tend) break;
     }
+    mrb_free(mrb, t);
   }
 
   while (ps<s && s[-1]=='0') s--;
