@@ -1477,18 +1477,6 @@ mpz_mul_int(mpz_ctx_t *ctx, mpz_t *x, mrb_int n)
   trim(x);
 }
 
-/* Forward declarations and constants for decimal base conversion */
-#ifdef MRB_NO_MPZ64BIT
-#define DECIMAL_BASE_CONV 10000UL      /* 10^4 for 16-bit limbs */
-#define DECIMAL_DIGITS_CONV 4
-#else
-#define DECIMAL_BASE_CONV 1000000000UL /* 10^9 for 32-bit limbs */
-#define DECIMAL_DIGITS_CONV 9
-#endif
-
-static size_t mpz_str_to_decimal(const char *s, mrb_int len, mp_limb *decimal_out, mrb_int *effective_len);
-static size_t mpz_decimal_to_binary(const mp_limb *decimal, size_t decimal_size, mp_limb *limbs_out);
-
 static int
 mpz_init_set_str(mpz_ctx_t *ctx, mpz_t *x, const char *s, mrb_int len, mrb_int base)
 {
@@ -1506,76 +1494,26 @@ mpz_init_set_str(mpz_ctx_t *ctx, mpz_t *x, const char *s, mrb_int len, mrb_int b
   else
     sn = 1;
 
-  if (base == 10) {
-    /* Use optimized decimal parsing: parse 9 digits at a time */
-    /* First validate that all characters are valid decimal digits */
-    for (mrb_int i = 0; i < len; i++) {
-      if (s[i] == '_') continue;
-      if (s[i] < '0' || s[i] > '9') {
-        retval = (-1);
-        break;
-      }
+  for (mrb_int i = 0; i < len; i++) {
+    if (s[i]=='_') continue;
+    if (s[i] >= '0' && s[i] <= '9')
+      k = (uint8_t)s[i] - (uint8_t)'0';
+    else if (s[i] >= 'A' && s[i] <= 'Z')
+      k = (uint8_t)s[i] - (uint8_t)'A'+10;
+    else if (s[i] >= 'a' && s[i] <= 'z')
+      k = (uint8_t)s[i] - (uint8_t)'a'+10;
+    else {
+      retval = (-1);
+      break;
     }
-
-    if (retval == 0) {
-      /* Estimate size: ceil(len / DECIMAL_DIGITS_CONV) decimal chunks */
-      size_t decimal_alloc = (size_t)((len + DECIMAL_DIGITS_CONV - 1) / DECIMAL_DIGITS_CONV) + 1;
-
-      /* Try pool first (no Karatsuba in this path), fall back to malloc */
-      size_t pool_state = pool_save(ctx);
-      mp_limb *decimal = pool_alloc(MPZ_POOL(ctx), decimal_alloc);
-      mrb_bool use_heap = (decimal == NULL);
-      if (use_heap) {
-        decimal = (mp_limb*)mrb_malloc(MPZ_MRB(ctx), decimal_alloc * sizeof(mp_limb));
-      }
-
-      mrb_int effective_len;
-      size_t decimal_size = mpz_str_to_decimal(s, len, decimal, &effective_len);
-
-      if (decimal_size > 0) {
-        /* Estimate binary limbs needed: roughly (effective_len * 10) / (32 * 3) limbs */
-        size_t limb_alloc = (size_t)((effective_len * 4 + 9) / 10) + 2;
-        /* Use realloc to reuse x->p buffer, avoiding extra malloc+free */
-        x->p = (mp_limb*)mrb_realloc(MPZ_MRB(ctx), x->p, limb_alloc * sizeof(mp_limb));
-        memset(x->p, 0, limb_alloc * sizeof(mp_limb));
-
-        size_t limb_size = mpz_decimal_to_binary(decimal, decimal_size, x->p);
-
-        x->sz = (mrb_int)limb_size;
-        x->sn = limb_size == 0 ? 0 : sn;
-      }
-
-      if (use_heap) {
-        mrb_free(MPZ_MRB(ctx), decimal);
-      }
-      else {
-        pool_restore(ctx, pool_state);
-      }
+    if (k >= base) {
+      retval = (-1);
+      break;
     }
+    mpz_mul_int(ctx, x, base);
+    mpz_add_int(ctx, x, k);
   }
-  else {
-    /* Use schoolbook algorithm for other bases */
-    for (mrb_int i = 0; i < len; i++) {
-      if (s[i]=='_') continue;
-      if (s[i] >= '0' && s[i] <= '9')
-        k = (uint8_t)s[i] - (uint8_t)'0';
-      else if (s[i] >= 'A' && s[i] <= 'Z')
-        k = (uint8_t)s[i] - (uint8_t)'A'+10;
-      else if (s[i] >= 'a' && s[i] <= 'z')
-        k = (uint8_t)s[i] - (uint8_t)'a'+10;
-      else {
-        retval = (-1);
-        break;
-      }
-      if (k >= base) {
-        retval = (-1);
-        break;
-      }
-      mpz_mul_int(ctx, x, base);
-      mpz_add_int(ctx, x, k);
-    }
-    x->sn = x->sz == 0 ? 0 : sn;
-  }
+  x->sn = x->sz == 0 ? 0 : sn;
 
   return retval;
 }
@@ -1655,92 +1593,6 @@ static const mp_limb base_limit[34*2] = {
   2176782336UL, // 36^6
 #endif
 };
-
-/*
- * Parse decimal string into decimal-base array.
- * Parses in chunks of DECIMAL_DIGITS_CONV digits from right to left.
- * Returns number of decimal base digits written to decimal_out.
- * Also returns the effective string length (excluding underscores) via *effective_len.
- */
-static size_t
-mpz_str_to_decimal(const char *s, mrb_int len, mp_limb *decimal_out, mrb_int *effective_len)
-{
-  /* First pass: count effective digits (excluding underscores) */
-  mrb_int eff_len = 0;
-  for (mrb_int i = 0; i < len; i++) {
-    if (s[i] != '_') eff_len++;
-  }
-  *effective_len = eff_len;
-
-  if (eff_len == 0) return 0;
-
-  /* Parse from right to left in chunks of DECIMAL_DIGITS_CONV digits */
-  size_t decimal_size = 0;
-  mrb_int pos = len - 1;
-  mrb_int digits_in_chunk = 0;
-  mp_limb chunk = 0;
-  mp_limb multiplier = 1;
-
-  while (pos >= 0) {
-    char c = s[pos--];
-    if (c == '_') continue;
-
-    /* Accumulate digit into chunk */
-    mp_limb digit = (mp_limb)(c - '0');
-    chunk += digit * multiplier;
-    multiplier *= 10;
-    digits_in_chunk++;
-
-    if (digits_in_chunk == DECIMAL_DIGITS_CONV) {
-      decimal_out[decimal_size++] = chunk;
-      chunk = 0;
-      multiplier = 1;
-      digits_in_chunk = 0;
-    }
-  }
-
-  /* Handle remaining partial chunk (MSB group) */
-  if (digits_in_chunk > 0) {
-    decimal_out[decimal_size++] = chunk;
-  }
-
-  return decimal_size;
-}
-
-/*
- * Convert decimal-base representation to binary limbs.
- * decimal[]: array of values < DECIMAL_BASE_CONV, LSB first
- * This is the reverse of mpz_base_convert_decimal.
- * Returns number of binary limbs written to limbs_out.
- */
-static size_t
-mpz_decimal_to_binary(const mp_limb *decimal, size_t decimal_size, mp_limb *limbs_out)
-{
-  if (decimal_size == 0) return 0;
-
-  size_t limb_size = 0;
-
-  /* Process decimal digits from MSB to LSB */
-  for (size_t i = decimal_size; i > 0; i--) {
-    mp_limb d = decimal[i - 1];
-
-    /* Multiply existing binary limbs by DECIMAL_BASE_CONV and add d */
-    mp_dbl_limb carry = d;
-    for (size_t j = 0; j < limb_size; j++) {
-      mp_dbl_limb z = (mp_dbl_limb)limbs_out[j] * DECIMAL_BASE_CONV + carry;
-      limbs_out[j] = (mp_limb)z;
-      carry = z >> DIG_SIZE;
-    }
-
-    /* Handle remaining carry into new limbs */
-    while (carry) {
-      limbs_out[limb_size++] = (mp_limb)carry;
-      carry >>= DIG_SIZE;
-    }
-  }
-
-  return limb_size;
-}
 
 static char*
 mpz_get_str(mpz_ctx_t *ctx, char *s, mrb_int sz, mrb_int base, mpz_t *x)
