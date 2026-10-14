@@ -81,7 +81,6 @@ pool_restore(mpz_ctx_t *ctx, size_t state)
 /* Forward declarations */
 static void mpz_mul_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e);
 static void mpz_div_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e);
-static void mpz_mod_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e);
 static void mpz_set_int(mpz_ctx_t *ctx, mpz_t *y, mrb_int v);
 static void mpz_mul(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u, mpz_t *v);
 
@@ -720,194 +719,6 @@ mpz_mul(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u, mpz_t *v)
   mpz_move(ctx, ww, &w);
 }
 
-/* Allocation-free multiplication helper functions */
-
-/* Copy limbs forward: dest[0..n-1] = src[0..n-1] */
-static void
-mpn_copyi(mp_limb *dest, const mp_limb *src, size_t n)
-{
-  if (n > 0) {
-    memcpy(dest, src, n * sizeof(mp_limb));
-  }
-}
-
-/* Add limbs at offset: dest[offset..offset+n-1] += src[0..n-1] */
-static void
-limb_add_at(mp_limb *dest, size_t dest_len, const mp_limb *src, size_t n, size_t offset)
-{
-  mp_limb carry = 0;
-  size_t i = 0;
-  for (i = 0; i < n; i++) {
-    mp_dbl_limb sum = (mp_dbl_limb)dest[offset + i] + (mp_dbl_limb)src[i] + carry;
-    dest[offset + i] = LOW(sum);
-    carry = HIGH(sum);
-  }
-  /* Propagate final carry */
-  i = offset + n;
-  while (carry && i < dest_len) {
-    mp_dbl_limb sum = (mp_dbl_limb)dest[i] + carry;
-    dest[i] = LOW(sum);
-    carry = HIGH(sum);
-    i++;
-  }
-}
-
-/* Basic multiplication for small operands */
-static void
-mpz_mul_basic_limbs(mp_limb *result, const mp_limb *x, size_t x_len,
-                    const mp_limb *y, size_t y_len)
-{
-  mpn_zero(result, x_len + y_len);
-
-  for (size_t i = 0; i < x_len; i++) {
-    if (x[i] == 0) continue;
-    mp_limb carry = mpn_addmul_1(result + i, y, y_len, x[i]);
-    if (i + y_len < x_len + y_len) {
-      result[i + y_len] += carry;
-    }
-  }
-}
-
-/*
- * Add with carry, handling different sizes.
- * rp[0..rn-1] = ap[0..an-1] + bp[0..bn-1]
- * rn must be >= max(an, bn)
- * Returns final carry.
- */
-static mp_limb
-mpn_add_var(mp_limb *rp, const mp_limb *ap, size_t an,
-            const mp_limb *bp, size_t bn, size_t rn)
-{
-  mp_limb carry = 0;
-  size_t i;
-
-  /* Add common part */
-  size_t min_n = (an < bn) ? an : bn;
-  for (i = 0; i < min_n; i++) {
-    mp_dbl_limb sum = (mp_dbl_limb)ap[i] + bp[i] + carry;
-    rp[i] = LOW(sum);
-    carry = HIGH(sum);
-  }
-
-  /* Copy and propagate carry through longer operand */
-  if (an > bn) {
-    for (; i < an; i++) {
-      mp_dbl_limb sum = (mp_dbl_limb)ap[i] + carry;
-      rp[i] = LOW(sum);
-      carry = HIGH(sum);
-    }
-  } else {
-    for (; i < bn; i++) {
-      mp_dbl_limb sum = (mp_dbl_limb)bp[i] + carry;
-      rp[i] = LOW(sum);
-      carry = HIGH(sum);
-    }
-  }
-
-  /* Zero-fill remainder and propagate final carry */
-  for (; i < rn; i++) {
-    rp[i] = carry;
-    carry = 0;
-  }
-
-  return carry;
-}
-
-/*
- * Subtract with borrow, result may be negative.
- * rp[0..n-1] = ap[0..n-1] - bp[0..n-1]
- * Returns 1 if result is negative (borrow out), 0 otherwise.
- */
-static mp_limb
-mpn_sub_var(mp_limb *rp, const mp_limb *ap, size_t an,
-            const mp_limb *bp, size_t bn, size_t n)
-{
-  mp_dbl_limb_signed borrow = 0;
-  size_t i;
-
-  for (i = 0; i < n; i++) {
-    mp_limb a = (i < an) ? ap[i] : 0;
-    mp_limb b = (i < bn) ? bp[i] : 0;
-    borrow += (mp_dbl_limb_signed)a - (mp_dbl_limb_signed)b;
-    rp[i] = LOW(borrow);
-    borrow = HIGH(borrow);
-  }
-
-  return (borrow < 0) ? 1 : 0;
-}
-
-/*
- * Negate a limb array (two's complement).
- * rp[0..n-1] = -ap[0..n-1]
- */
-static void
-mpn_neg(mp_limb *rp, const mp_limb *ap, size_t n)
-{
-  mp_limb carry = 1;
-  for (size_t i = 0; i < n; i++) {
-    mp_dbl_limb sum = (mp_dbl_limb)(~ap[i]) + carry;
-    rp[i] = LOW(sum);
-    carry = HIGH(sum);
-  }
-}
-
-/*
- * Check if mpz is "all ones" pattern (2^n - 1).
- * For such a number:
- *   - All limbs except possibly the top one equal DIG_MASK
- *   - The top limb equals (1 << k) - 1 for some k in 1..DIG_SIZE
- * Returns the bit count n if all-ones, 0 otherwise.
- */
-static size_t
-mpz_all_ones_p(mpz_t *x)
-{
-  if (x->sn <= 0 || x->sz == 0) return 0;
-
-  /* Check all but top limb */
-  for (size_t i = 0; i + 1 < x->sz; i++) {
-    if (x->p[i] != DIG_MASK) return 0;
-  }
-
-  /* Check top limb: must be (1 << k) - 1 for some k */
-  mp_limb top = x->p[x->sz - 1];
-  if (top == 0) return 0;
-
-  /* Check if top is all-ones pattern: (top & (top + 1)) == 0 */
-  if ((top & (top + 1)) != 0) return 0;
-
-  /* Count bits in top limb */
-  size_t top_bits = 0;
-  while (top) { top_bits++; top >>= 1; }
-
-  return (x->sz - 1) * DIG_SIZE + top_bits;
-}
-
-/*
- * Check if x is a power of 2 (2^n).
- * Returns n if x = 2^n, or 0 otherwise.
- * This is the "mostly-zero" pattern common in fuzzing tests.
- */
-static size_t
-mpz_power_of_2_exp(mpz_t *x)
-{
-  if (x->sn <= 0 || x->sz == 0) return 0;
-
-  /* All limbs except top must be zero */
-  for (size_t i = 0; i + 1 < x->sz; i++) {
-    if (x->p[i] != 0) return 0;
-  }
-
-  /* Top limb must be a power of 2: (v & (v - 1)) == 0 */
-  mp_limb top = x->p[x->sz - 1];
-  if (top == 0 || (top & (top - 1)) != 0) return 0;
-
-  /* Count trailing zeros in top limb to get bit position */
-  size_t bit_pos = 0;
-  while ((top & 1) == 0) { bit_pos++; top >>= 1; }
-
-  return (x->sz - 1) * DIG_SIZE + bit_pos;
-}
-
 /* Count set bits in a limb */
 static inline int
 limb_popcount(mp_limb x)
@@ -925,12 +736,6 @@ limb_popcount(mp_limb x)
   }
   return count;
 #endif
-}
-
-static void
-mpz_sqr(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u)
-{
-  return mpz_mul(ctx, ww, u, u);
 }
 
 /* number of leading zero bits in digit */
@@ -1851,19 +1656,6 @@ static const mp_limb base_limit[34*2] = {
 #endif
 };
 
-/* Lookup table for fast 2-digit conversion (Lemire's small table technique) */
-static const char digit_pairs[] =
-  "00010203040506070809"
-  "10111213141516171819"
-  "20212223242526272829"
-  "30313233343536373839"
-  "40414243444546474849"
-  "50515253545556575859"
-  "60616263646566676869"
-  "70717273747576777879"
-  "80818283848586878889"
-  "90919293949596979899";
-
 /*
  * Parse decimal string into decimal-base array.
  * Parses in chunks of DECIMAL_DIGITS_CONV digits from right to left.
@@ -1948,55 +1740,6 @@ mpz_decimal_to_binary(const mp_limb *decimal, size_t decimal_size, mp_limb *limb
   }
 
   return limb_size;
-}
-
-/*
- * Convert decimal base representation to string.
- * decimal[]: array of values < DECIMAL_BASE_CONV, LSB first
- * Returns pointer past last character written.
- */
-static char*
-mpz_decimal_to_str(const mp_limb *decimal, size_t decimal_size, char *str)
-{
-  if (decimal_size == 0) {
-    *str++ = '0';
-    return str;
-  }
-
-  char *s = str;
-
-  /* Output all but MSB group with exactly DECIMAL_DIGITS_CONV digits each */
-  /* Use digit_pairs for 2 digits at a time (Lemire's small table technique) */
-  for (size_t i = 0; i < decimal_size - 1; i++) {
-    mp_limb d = decimal[i];
-    for (int j = 0; j < DECIMAL_DIGITS_CONV / 2; j++) {
-      mp_limb pair = d % 100;
-      d /= 100;
-      *s++ = digit_pairs[pair * 2 + 1];
-      *s++ = digit_pairs[pair * 2];
-    }
-#if (DECIMAL_DIGITS_CONV & 1)
-    /* Handle odd digit (9th digit for 32-bit limbs) */
-    *s++ = '0' + (char)d;
-#endif
-  }
-
-  /* Output MSB group without leading zeros, 2 digits at a time */
-  mp_limb d = decimal[decimal_size - 1];
-  do {
-    if (d >= 10) {
-      mp_limb pair = d % 100;
-      d /= 100;
-      *s++ = digit_pairs[pair * 2 + 1];
-      *s++ = digit_pairs[pair * 2];
-    }
-    else {
-      *s++ = '0' + (char)d;
-      break;
-    }
-  } while (d > 0);
-
-  return s;
 }
 
 static char*
@@ -2272,68 +2015,6 @@ mpz_neg(mpz_ctx_t *ctx, mpz_t *x, mpz_t *y)
   mpz_set(ctx, x, y);
   trim(x);
   x->sn = -(y->sn);
-}
-
-/* Fast modular reduction by power of 2: z = x mod 2^e */
-static void
-mpz_mod_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e)
-{
-  if (e <= 0) {
-    mpz_clear(ctx, z);
-    mpz_init(ctx, z);
-    zero(z);
-    return;
-  }
-
-  size_t eint = e / DIG_SIZE;
-  size_t bs = e % DIG_SIZE;
-  size_t sz = x->sz;
-
-  if (eint >= sz) {
-    /* x < 2^e, so x mod 2^e = x */
-    if (z != x) {
-      mpz_clear(ctx, z);
-      mpz_init_heap(ctx, z, x->sz);
-      mpz_set(ctx, z, x);
-      trim(z);
-    }
-    return;
-  }
-
-  /* Need to mask off high bits */
-  size_t result_sz = eint + (bs > 0 ? 1 : 0);
-
-  /* Handle the case where z == x (in-place operation) */
-  if (z == x) {
-    /* In-place modification */
-    z->sz = result_sz;
-
-    /* Mask partial limb if needed */
-    if (bs > 0) {
-      mp_limb mask = (1UL << bs) - 1;
-      z->p[eint] &= mask;
-    }
-  }
-  else {
-    /* z != x, need to copy */
-    mpz_clear(ctx, z);
-    mpz_init_heap(ctx, z, result_sz);
-    z->sn = x->sn;
-    z->sz = result_sz;
-
-    /* Copy full limbs */
-    for (size_t i = 0; i < eint; i++) {
-      z->p[i] = x->p[i];
-    }
-
-    /* Mask partial limb if needed */
-    if (bs > 0) {
-      mp_limb mask = (1UL << bs) - 1;
-      z->p[eint] = x->p[eint] & mask;
-    }
-  }
-
-  trim(z);
 }
 
 #define make_2comp(v,c) do { v=~(v)+(c); c=((v)==0 && (c));} while (0)
