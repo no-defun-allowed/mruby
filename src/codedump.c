@@ -7,7 +7,7 @@
 #include <mruby/dump.h>
 #include <mruby/internal.h>
 
-#ifndef MRB_NO_STDIO
+#if !defined(MRB_NO_STDIO) && !defined(MRB_SMALLER)
 static mrb_bool
 print_r_p(mrb_state *mrb, const mrb_irep *irep, size_t n)
 {
@@ -686,7 +686,7 @@ mrb_codedump_all_file(mrb_state *mrb, struct RProc *proc, FILE *out)
 void
 mrb_codedump_all(mrb_state *mrb, struct RProc *proc)
 {
-#ifndef MRB_NO_STDIO
+#if !defined(MRB_NO_STDIO) && !defined(MRB_SMALLER)
   mrb_codedump_all_file(mrb, proc, stdout);
 #endif
 }
