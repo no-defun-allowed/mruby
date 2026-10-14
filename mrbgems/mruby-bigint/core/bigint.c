@@ -663,7 +663,7 @@ mpn_addmul_1(mp_limb *rp, const mp_limb *s1p, size_t n, mp_limb limb)
 
 /* w = u * v (optimized schoolbook using mpn_addmul_1) */
 static void
-mpz_mul_basic(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u, mpz_t *v)
+mpz_mul(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u, mpz_t *v)
 {
   if (zero_p(u) || zero_p(v)) {
     zero(ww);
@@ -925,18 +925,6 @@ limb_popcount(mp_limb x)
   }
   return count;
 #endif
-}
-
-/* w = u * v */
-static void
-mpz_mul(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u, mpz_t *v)
-{
-  if (zero_p(u) || zero_p(v)) {
-    zero(ww);
-    return;
-  }
-  mpz_mul_basic(ctx, ww, u, v);
-  return;
 }
 
 static void
@@ -1588,10 +1576,6 @@ mpz_mod_limb(mpz_ctx_t *ctx, mpz_t *r, mpz_t *x, mp_limb m)
     r->sn = 0;
 }
 
-/* Forward declarations for Barrett reduction functions */
-static void mpz_barrett_mu(mpz_ctx_t *ctx, mpz_t *mu, mpz_t *m);
-static void mpz_barrett_reduce(mpz_ctx_t *ctx, mpz_t *r, mpz_t *x, mpz_t *m, mpz_t *mu);
-
 static void
 mpz_mod(mpz_ctx_t *ctx, mpz_t *r, mpz_t *x, mpz_t *y)
 {
@@ -1606,20 +1590,6 @@ mpz_mod(mpz_ctx_t *ctx, mpz_t *r, mpz_t *x, mpz_t *y)
   if (y->sz == 1) {
     mpz_mod_limb(ctx, r, x, y->p[0]);
     if (y->sn < 0) r->sn = -r->sn;
-    return;
-  }
-
-  /* Barrett reduction for moderate-sized moduli (>= 4 limbs where setup is worthwhile) */
-  if (y->sz >= 4 && y->sz <= 16 && x->sz >= y->sz + 2) {
-    mpz_t mu;
-    mpz_init_temp(ctx, &mu, y->sz + 1);
-    mpz_barrett_mu(ctx, &mu, y);
-    mpz_realloc(ctx, r, y->sz);
-    mpz_barrett_reduce(ctx, r, x, y, &mu);
-    r->sn = sn;
-    if (uzero_p(r))
-      r->sn = 0;
-    mpz_clear(ctx, &mu);
     return;
   }
 
@@ -2973,10 +2943,6 @@ mpz_pow(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mrb_int e)
   mpz_clear(ctx, &temp);
 }
 
-/* Forward declaration for Montgomery modular exponentiation */
-static void mpz_powm_montgomery(mpz_ctx_t *ctx, mpz_t *result,
-                                const mpz_t *base, const mpz_t *exp, const mpz_t *n);
-
 static void
 mpz_powm(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mpz_t *ex, mpz_t *n)
 {
@@ -2999,37 +2965,13 @@ mpz_powm(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mpz_t *ex, mpz_t *n)
     }
   }
 
-  /*
-   * Use Montgomery reduction for odd moduli >= 4 limbs.
-   * Montgomery is faster because it replaces division with multiplication.
-   * For smaller moduli, Barrett has less setup overhead.
-   */
-  if (n->sz >= 4 && (n->p[0] & 1) == 1) {
-    mpz_powm_montgomery(ctx, zz, x, ex, n);
-    return;
-  }
-
-  /*
-   * Fall back to Barrett reduction for even moduli or small moduli.
-   * Barrett works for any modulus and is faster than division.
-   */
   size_t pool_state = pool_save(ctx);
   mpz_t t, b;
   mpz_init_set_int(ctx, &t, 1);
   mpz_init_set(ctx, &b, x);
 
-  /*
-   * Use Barrett reduction for moduli >= 4 limbs.
-   * For smaller moduli (2-3 limbs), simple division is faster because
-   * Barrett's 2 multiplications + overhead exceed 1 division cost.
-   */
-  mpz_t mu, temp;
-  int use_barrett = (n->sz >= 4);
+  mpz_t temp;
   mpz_init_temp(ctx, &temp, n->sz * 2);  /* For intermediate calculations */
-  if (use_barrett) {
-    mpz_init_temp(ctx, &mu, n->sz + 1);  /* Barrett parameter */
-    mpz_barrett_mu(ctx, &mu, n);
-  }
 
   size_t len = digits(ex);
   for (size_t i = 0; i < len; i++) {
@@ -3037,21 +2979,11 @@ mpz_powm(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mpz_t *ex, mpz_t *n)
     for (size_t j = 0; j < sizeof(mp_limb) * 8; j++) {
       if ((e & 1) == 1) {
         mpz_mul(ctx, &temp, &t, &b);
-        if (use_barrett) {
-          mpz_barrett_reduce(ctx, &t, &temp, n, &mu);
-        }
-        else {
-          mpz_mod(ctx, &t, &temp, n);
-        }
+        mpz_mod(ctx, &t, &temp, n);
       }
       e >>= 1;
       mpz_mul(ctx, &temp, &b, &b);
-      if (use_barrett) {
-        mpz_barrett_reduce(ctx, &b, &temp, n, &mu);
-      }
-      else {
-        mpz_mod(ctx, &b, &temp, n);
-      }
+      mpz_mod(ctx, &b, &temp, n);
     }
   }
 
@@ -3059,9 +2991,6 @@ mpz_powm(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mpz_t *ex, mpz_t *n)
   mpz_clear(ctx, &t);
   mpz_clear(ctx, &b);
   mpz_clear(ctx, &temp);
-  if (use_barrett) {
-    mpz_clear(ctx, &mu);
-  }
   pool_restore(ctx, pool_state);
 }
 
@@ -3077,69 +3006,22 @@ mpz_powm_i(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mrb_int ex, mpz_t *n)
     return;
   }
 
-  /* Check modulus size before allocating large temporaries.
-   * Both Barrett and Montgomery need 2^(2k) internally,
-   * which would exceed MRB_BIGINT_BIT_LIMIT for large moduli. */
-  {
-    size_t mod_bits = (size_t)n->sz * DIG_SIZE;
-    if (mod_bits > MRB_BIGINT_BIT_LIMIT / 2) {
-      mrb_state *mrb = MPZ_MRB(ctx);
-      mrb_raise(mrb, E_RANGE_ERROR, "modulus too large");
-    }
-  }
-
-  /*
-   * Use Montgomery reduction for odd moduli (common in cryptography).
-   * Convert integer exponent to mpz_t and use the main Montgomery implementation.
-   */
-  if (n->sz >= 2 && (n->p[0] & 1) == 1) {
-    mpz_t exp_mpz;
-    mpz_init_set_int(ctx, &exp_mpz, ex);
-    mpz_powm_montgomery(ctx, zz, x, &exp_mpz, n);
-    mpz_clear(ctx, &exp_mpz);
-    return;
-  }
-
-  /*
-   * Fall back to Barrett reduction for even moduli or small moduli.
-   */
   size_t pool_state = pool_save(ctx);
   mpz_t t, b;
   mpz_init_set_int(ctx, &t, 1);
   mpz_init_set(ctx, &b, x);
-
-  /*
-   * Use Barrett reduction for moduli >= 4 limbs.
-   * For smaller moduli (2-3 limbs), simple division is faster.
-   */
-  mpz_t mu, temp;
-  int use_barrett = (n->sz >= 4);
+  mpz_t temp;
 
   mpz_init_temp(ctx, &temp, n->sz * 2);  /* For intermediate calculations */
-  if (use_barrett) {
-    mpz_init_temp(ctx, &mu, n->sz + 1);  /* Barrett parameter */
-    mpz_barrett_mu(ctx, &mu, n);
-  }
-
   while (ex > 0) {
     if ((ex & 1) == 1) {
       mpz_mul(ctx, &temp, &t, &b);
-      if (use_barrett) {
-        mpz_barrett_reduce(ctx, &t, &temp, n, &mu);
-      }
-      else {
-        mpz_mod(ctx, &t, &temp, n);
-      }
+      mpz_mod(ctx, &t, &temp, n);
     }
     ex >>= 1;
     if (ex > 0) {  /* Skip final squaring when ex becomes 0 */
       mpz_mul(ctx, &temp, &b, &b);
-      if (use_barrett) {
-        mpz_barrett_reduce(ctx, &b, &temp, n, &mu);
-      }
-      else {
-        mpz_mod(ctx, &b, &temp, n);
-      }
+      mpz_mod(ctx, &b, &temp, n);
     }
   }
 
@@ -3147,9 +3029,6 @@ mpz_powm_i(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mrb_int ex, mpz_t *n)
   mpz_clear(ctx, &t);
   mpz_clear(ctx, &b);
   mpz_clear(ctx, &temp);
-  if (use_barrett) {
-    mpz_clear(ctx, &mu);
-  }
   pool_restore(ctx, pool_state);
 }
 
@@ -3397,96 +3276,6 @@ mpz_bits(const mpz_t *x)
   return i * limb_bits + (limb_bits - lzb(high));
 }
 
-/* Compute Barrett parameter mu = floor(2^(2k) / m) where k ~ log2(m) */
-static void
-mpz_barrett_mu(mpz_ctx_t *ctx, mpz_t *mu, mpz_t *m)
-{
-  size_t k = mpz_bits(m);
-  mpz_t temp;
-
-  mpz_init_set_int(ctx, &temp, 1);
-  mpz_mul_2exp(ctx, &temp, &temp, 2 * k);  /* temp = 2^(2k) */
-  mpz_mdiv(ctx, mu, &temp, m);             /* mu = floor(2^(2k) / m) */
-  mpz_clear(ctx, &temp);
-}
-
-/* Barrett reduction: r = x mod m using precomputed mu */
-static void
-mpz_barrett_reduce(mpz_ctx_t *ctx, mpz_t *r, mpz_t *x, mpz_t *m, mpz_t *mu)
-{
-  size_t k = mpz_bits(m);
-
-  /* If x < m, then x mod m = x */
-  if (mpz_cmp(ctx, x, m) < 0) {
-    mpz_set(ctx, r, x);
-    return;
-  }
-
-  /* Save pool state for proper cleanup of temporary allocations */
-  size_t pool_state = pool_save(ctx);
-
-  mpz_t q1, q2, q3, r1, r2;
-  /* Conservative size estimates for Barrett reduction temporaries */
-  size_t q_size = x->sz + mu->sz + 1;  /* For multiplication results */
-  size_t r_size = m->sz + 1;           /* For modular reduction results */
-
-  mpz_init_temp(ctx, &q1, x->sz + 1);
-  mpz_init_temp(ctx, &q2, q_size);
-  mpz_init_temp(ctx, &q3, q_size);
-  mpz_init_temp(ctx, &r1, r_size);
-  mpz_init_temp(ctx, &r2, r_size);
-
-  /* Step 1: q1 = floor(x / 2^(k-1)) */
-  if (k > 1) {
-    mpz_div_2exp(ctx, &q1, x, k - 1);
-  }
-  else {
-    mpz_set(ctx, &q1, x);
-  }
-
-  /* Step 2: q2 = q1 * mu */
-  mpz_mul(ctx, &q2, &q1, mu);
-
-  /* Step 3: q3 = floor(q2 / 2^(k+1)) */
-  mpz_div_2exp(ctx, &q3, &q2, k + 1);
-
-  /* Step 4: r1 = x mod 2^(k+1) */
-  mpz_mod_2exp(ctx, &r1, x, k + 1);
-
-  /* Step 5: r2 = (q3 * m) mod 2^(k+1) */
-  mpz_mul(ctx, &r2, &q3, m);
-  mpz_mod_2exp(ctx, &r2, &r2, k + 1);
-
-  /* Step 6: r = r1 - r2 */
-  if (mpz_cmp(ctx, &r1, &r2) >= 0) {
-    mpz_sub(ctx, r, &r1, &r2);
-  }
-  else {
-    /* r1 < r2, so add 2^(k+1) to r1 */
-    mpz_t power;
-    mpz_init_set_int(ctx, &power, 1);
-    mpz_mul_2exp(ctx, &power, &power, k + 1);
-    mpz_add(ctx, &r1, &r1, &power);
-    mpz_sub(ctx, r, &r1, &r2);
-    mpz_clear(ctx, &power);
-  }
-
-  /* Step 7: Final correction - ensure 0 <= r < m */
-  while (mpz_cmp(ctx, r, m) >= 0) {
-    mpz_sub(ctx, r, r, m);
-  }
-
-  /* Cleanup temporaries */
-  mpz_clear(ctx, &q1);
-  mpz_clear(ctx, &q2);
-  mpz_clear(ctx, &q3);
-  mpz_clear(ctx, &r1);
-  mpz_clear(ctx, &r2);
-
-  /* Restore pool state to free any temporary pool allocations */
-  pool_restore(ctx, pool_state);
-}
-
 static void
 mpz_sqrt(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x)
 {
@@ -3526,211 +3315,6 @@ mpz_sqrt(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x)
 
   mpz_move(ctx, z, &s);
   mpz_clear(ctx, &t);
-}
-
-
-/* Barrett reduction for efficient modular arithmetic with repeated operations */
-
-/*
- * Montgomery Reduction
- *
- * Montgomery reduction computes x * R^(-1) mod n without division, where
- * R = 2^(k*64) for a k-limb modulus. This is faster than Barrett for
- * repeated modular operations with the same modulus (e.g., modular exponentiation).
- *
- * Requirements:
- * - n must be ODD (n[0] & 1 == 1)
- * - R > n (automatically satisfied since R = 2^(k*64) >= 2^64 > any k-limb number)
- *
- * Key insight: Instead of computing x mod n directly, we work in "Montgomery form"
- * where a' = a * R mod n. Multiplication in Montgomery form:
- *   a' * b' = (aR)(bR) * R^(-1) mod n = abR mod n = (ab)'
- */
-
-/*
- * Compute rho = -n[0]^(-1) mod 2^64 using Newton's method.
- * This is the Montgomery constant needed for reduction.
- */
-static mp_limb
-montgomery_setup(mp_limb n0)
-{
-  /* n must be odd for this to work */
-  mrb_assert((n0 & 1) == 1);
-
-  /*
-   * Newton's method for modular inverse:
-   * x_{i+1} = x_i * (2 - n0 * x_i) mod 2^k
-   *
-   * Starting with x = 1 (which satisfies x * n0 ≡ 1 mod 2),
-   * each iteration doubles the number of correct bits.
-   */
-  mp_limb x = 1;
-
-  /* 6 iterations: 1 -> 2 -> 4 -> 8 -> 16 -> 32 -> 64 bits */
-  for (int i = 0; i < 6; i++) {
-    x = x * (2 - n0 * x);  /* Implicit mod 2^64 via overflow */
-  }
-
-  /* Return -x mod 2^64 = negation of modular inverse */
-  return (mp_limb)0 - x;
-}
-
-/*
- * Montgomery reduction: result = x * R^(-1) mod n
- *
- * Algorithm (REDC):
- *   m = (x mod R) * rho mod R
- *   t = (x + m * n) / R
- *   if t >= n: t = t - n
- *   return t
- *
- * The key insight is that (x + m*n) is always divisible by R,
- * so the division is just a right shift (drop low limbs).
- */
-static void
-mpz_montgomery_reduce(mpz_ctx_t *ctx, mpz_t *result,
-                      const mpz_t *x, const mpz_t *n, mp_limb rho)
-{
-  size_t k = n->sz;  /* Number of limbs in modulus */
-  size_t x_len = x->sz;
-
-  /* Allocate workspace: Montgomery reduction writes k limbs at work[i] for i=0..k-1,
-   * so the maximum index accessed is work[2k-1] (from carry propagation).
-   * We need at least 2k limbs, plus extra if x_len > k. */
-  size_t work_size = (x_len > k) ? (x_len + k + 2) : (2 * k + 2);
-  size_t pool_state = pool_save(ctx);
-
-  mp_limb *work = NULL;
-  if (MPZ_HAS_POOL(ctx)) {
-    work = pool_alloc(MPZ_POOL(ctx), work_size);
-  }
-  mrb_bool heap_alloc = (work == NULL);
-  if (heap_alloc) {
-    work = (mp_limb*)mrb_malloc(MPZ_MRB(ctx), work_size * sizeof(mp_limb));
-  }
-
-  /* Copy x to work buffer, zero-extend if necessary */
-  mpn_copyi(work, x->p, x_len);
-  mpn_zero(work + x_len, work_size - x_len);
-
-  /*
-   * Main Montgomery reduction loop:
-   * For i = 0 to k-1:
-   *   m_i = work[i] * rho mod 2^64
-   *   work += m_i * n * 2^(i*64)
-   */
-  for (size_t i = 0; i < k; i++) {
-    mp_limb m = work[i] * rho;
-
-    /* Add m * n at position i */
-    mp_limb carry = mpn_addmul_1(work + i, n->p, k, m);
-
-    /* Propagate carry */
-    for (size_t j = i + k; carry && j < work_size; j++) {
-      mp_dbl_limb sum = (mp_dbl_limb)work[j] + carry;
-      work[j] = LOW(sum);
-      carry = HIGH(sum);
-    }
-  }
-
-  /* Result is work[k..2k-1] (the upper k limbs after dividing by R) */
-  mpz_realloc(ctx, result, k + 1);
-  mpn_copyi(result->p, work + k, k + 1);
-  result->sz = k + 1;
-  result->sn = 1;
-  trim(result);
-
-  /* Final subtraction if result >= n */
-  if (ucmp(result, (mpz_t*)n) >= 0) {
-    mpz_sub(ctx, result, result, (mpz_t*)n);
-  }
-
-  /* Cleanup */
-  if (heap_alloc) {
-    mrb_free(MPZ_MRB(ctx), work);
-  }
-  pool_restore(ctx, pool_state);
-}
-
-/*
- * Compute R^2 mod n, needed for converting to Montgomery form.
- * a' = REDC(a * R^2) = a * R mod n
- */
-static void
-mpz_montgomery_calc_R2(mpz_ctx_t *ctx, mpz_t *R2, const mpz_t *n)
-{
-  size_t k = n->sz;
-
-  /* R = 2^(k*64), so R^2 = 2^(2*k*64) */
-  mpz_init_set_int(ctx, R2, 1);
-  mpz_mul_2exp(ctx, R2, R2, 2 * k * DIG_SIZE);
-
-  /* R2 = R^2 mod n */
-  mpz_mod(ctx, R2, R2, (mpz_t*)n);
-}
-
-/*
- * Montgomery modular exponentiation: result = base^exp mod n
- * Requires n to be odd.
- */
-static void
-mpz_powm_montgomery(mpz_ctx_t *ctx, mpz_t *result,
-                    const mpz_t *base, const mpz_t *exp, const mpz_t *n)
-{
-  size_t pool_state = pool_save(ctx);
-
-  /* Setup Montgomery parameters */
-  mp_limb rho = montgomery_setup(n->p[0]);
-
-  /* Compute R^2 mod n for conversion to Montgomery form */
-  mpz_t R2;
-  mpz_montgomery_calc_R2(ctx, &R2, n);
-
-  /* Compute R mod n = REDC(R^2) for initializing accumulator to 1 in Montgomery form */
-  mpz_t one_mont;
-  mpz_init(ctx, &one_mont);
-  mpz_montgomery_reduce(ctx, &one_mont, &R2, n, rho);
-
-  /* Convert base to Montgomery form: base_mont = base * R mod n = REDC(base * R^2) */
-  mpz_t base_mont, temp;
-  mpz_init(ctx, &base_mont);
-  mpz_init_temp(ctx, &temp, n->sz * 4);
-
-  mpz_mul(ctx, &temp, (mpz_t*)base, &R2);
-  mpz_montgomery_reduce(ctx, &base_mont, &temp, n, rho);
-
-  /* Initialize accumulator to 1 in Montgomery form */
-  mpz_t acc;
-  mpz_init_set(ctx, &acc, &one_mont);
-
-  /* Binary exponentiation in Montgomery form */
-  size_t exp_len = exp->sz;
-  for (size_t i = 0; i < exp_len; i++) {
-    mp_limb e = exp->p[i];
-    for (size_t j = 0; j < sizeof(mp_limb) * 8; j++) {
-      if ((e & 1) == 1) {
-        /* acc = acc * base_mont in Montgomery form */
-        mpz_mul(ctx, &temp, &acc, &base_mont);
-        mpz_montgomery_reduce(ctx, &acc, &temp, n, rho);
-      }
-      e >>= 1;
-
-      /* base_mont = base_mont^2 in Montgomery form */
-      mpz_mul(ctx, &temp, &base_mont, &base_mont);
-      mpz_montgomery_reduce(ctx, &base_mont, &temp, n, rho);
-    }
-  }
-
-  /* Convert result back from Montgomery form: result = REDC(acc) */
-  mpz_montgomery_reduce(ctx, result, &acc, n, rho);
-
-  /* Cleanup */
-  mpz_clear(ctx, &R2);
-  mpz_clear(ctx, &one_mont);
-  mpz_clear(ctx, &base_mont);
-  mpz_clear(ctx, &temp);
-  mpz_clear(ctx, &acc);
-  pool_restore(ctx, pool_state);
 }
 
 /* --- mruby functions --- */
