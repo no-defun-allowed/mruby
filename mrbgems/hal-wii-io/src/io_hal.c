@@ -447,14 +447,14 @@ void
 mrb_hal_io_init(mrb_state *mrb)
 {
   (void)mrb;
-  /* No special initialization needed for POSIX */
+  /* No special initialization needed for WII */
 }
 
 void
 mrb_hal_io_final(mrb_state *mrb)
 {
   (void)mrb;
-  /* No special cleanup needed for POSIX */
+  /* No special cleanup needed for WII */
 }
 
 /*
@@ -462,14 +462,14 @@ mrb_hal_io_final(mrb_state *mrb)
  */
 
 void
-mrb_hal_posix_io_gem_init(mrb_state *mrb)
+mrb_hal_wii_io_gem_init(mrb_state *mrb)
 {
   (void)mrb;
   /* HAL interface functions are called by mruby-io gem */
 }
 
 void
-mrb_hal_posix_io_gem_final(mrb_state *mrb)
+mrb_hal_wii_io_gem_final(mrb_state *mrb)
 {
   (void)mrb;
   /* Cleanup handled by mrb_hal_io_final called from mruby-io */

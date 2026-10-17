@@ -95,6 +95,9 @@ io_get_open_fptr(mrb_state *mrb, mrb_value io)
 #if !defined(MRB_NO_IO_POPEN) && defined(TARGET_OS_IPHONE) && TARGET_OS_IPHONE
 # define MRB_NO_IO_POPEN 1
 #endif
+#ifdef __wii__
+# define MRB_NO_IO_POPEN 1
+#endif
 
 #ifndef MRB_NO_IO_POPEN
 static void
