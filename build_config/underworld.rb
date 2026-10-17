@@ -10,6 +10,7 @@ MRuby::CrossBuild.new('underworld') do |conf|
     cc.compile_options = %(%{flags} -o "%{outfile}" -c "%{infile}")
     cc.flags = "-Oz -fno-exceptions -fno-asynchronous-unwind-tables"
     cc.defines << 'MRB_SMALLER'
+    cc.defines << 'MRB_TARGET_WII'
   end
 
   # C++ compiler
