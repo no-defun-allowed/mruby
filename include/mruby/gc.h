@@ -56,8 +56,6 @@ typedef struct mrb_gc {
   int current_white_part :2;       /* make white object by white_part */
   mrb_bool iterating     :1;       /* currently iterating over objects */
   mrb_bool disabled      :1;       /* GC disabled */
-  mrb_bool generational  :1;       /* generational GC mode */
-  mrb_bool full          :1;       /* major GC mode */
   mrb_bool out_of_memory :1;       /* out-of-memory error occurred */
 
 #ifdef MRB_GC_FIXED_ARENA

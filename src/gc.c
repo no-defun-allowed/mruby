@@ -90,23 +90,6 @@ void mrb_task_mark_all(mrb_state *mrb);
     * mrb_field_write_barrier - target B object for a mark.
     * mrb_write_barrier       - target A object for a mark.
 
-  == Generational Mode
-
-  mruby's GC offers an Generational Mode while reusing the tri-color GC
-  infrastructure. It will treat the Black objects as Old objects after each
-  sweep phase, instead of painting them White. The key ideas are still the same
-  as traditional generational GC:
-
-    * Minor GC - just traverse the Young objects (Gray objects) in the mark
-                 phase, then only sweep the newly created objects, and leave
-                 the Old objects live.
-
-    * Major GC - same as a full regular GC cycle.
-
-  The difference from "traditional" generational GC is, that the major GC
-  in mruby is triggered incrementally in a tri-color manner.
-
-
   For details, see the comments for each function.
 
 */
@@ -170,7 +153,6 @@ typedef struct mrb_heap_page {
   RVALUE *freelist;
   struct mrb_heap_page *next;
   struct mrb_heap_page *free_next;
-  mrb_bool old:1;
   mrb_bool region:1;             /* from contiguous region, not malloc */
   RVALUE objects[MRB_HEAP_PAGE_SIZE];
 } mrb_heap_page;
@@ -398,11 +380,6 @@ mrb_gc_add_region(mrb_state *mrb, void *start, size_t size)
 
 #define DEFAULT_GC_INTERVAL_RATIO 200
 #define DEFAULT_GC_STEP_RATIO 200
-#define MAJOR_GC_INC_RATIO 120
-#define MAJOR_GC_TOOMANY 10000
-#define is_generational(gc) ((gc)->generational)
-#define is_major_gc(gc) (is_generational(gc) && (gc)->full)
-#define is_minor_gc(gc) (is_generational(gc) && !(gc)->full)
 
 void
 mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
@@ -419,10 +396,6 @@ mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
   add_heap(mrb, gc);
   gc->interval_ratio = DEFAULT_GC_INTERVAL_RATIO;
   gc->step_ratio = DEFAULT_GC_STEP_RATIO;
-#ifndef MRB_GC_TURN_OFF_GENERATIONAL
-  gc->generational = TRUE;
-  gc->full = TRUE;
-#endif
 }
 
 static void obj_free(mrb_state *mrb, struct RBasic *obj, mrb_bool end);
@@ -1008,10 +981,8 @@ root_scan_phase(mrb_state *mrb, mrb_gc *gc)
 {
   int i, e;
 
-  if (!is_minor_gc(gc)) {
-    gc->gray_stack_top = 0;
-    gc->gray_overflow = FALSE;
-  }
+  gc->gray_stack_top = 0;
+  gc->gray_overflow = FALSE;
 
   mrb_gc_mark_gv(mrb);
   /* mark arena */
@@ -1177,11 +1148,6 @@ incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
     size_t freed = 0;
     mrb_bool dead_slot = TRUE;
 
-    if (is_minor_gc(gc) && page->old) {
-      /* skip a slot which doesn't contain any young object */
-      p = e;
-      dead_slot = FALSE;
-    }
     while (p<e) {
       if (is_dead(gc, &p->as.basic)) {
         if (p->as.basic.tt != MRB_TT_FREE) {
@@ -1197,8 +1163,7 @@ incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
         }
       }
       else {
-        if (!is_generational(gc))
-          paint_partial_white(gc, &p->as.basic); /* next gc target */
+        paint_partial_white(gc, &p->as.basic); /* next gc target */
         dead_slot = FALSE;
       }
       p++;
@@ -1216,10 +1181,6 @@ incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
       page = next;
     }
     else {
-      if (page->freelist == NULL && is_minor_gc(gc))
-        page->old = TRUE;
-      else
-        page->old = FALSE;
       prev = page;
       page = page->next;
     }
@@ -1295,25 +1256,6 @@ incremental_gc_step(mrb_state *mrb, mrb_gc *gc)
   gc->threshold = gc->live + GC_STEP_SIZE;
 }
 
-static void
-clear_all_old(mrb_state *mrb, mrb_gc *gc)
-{
-  mrb_assert(is_generational(gc));
-  if (gc->full) {
-    /* finish the half baked GC */
-    incremental_gc_finish(mrb, gc);
-  }
-  /* Sweep the dead objects, then reset all the live objects
-   * (including all the old objects, of course) to white. */
-  gc->generational = FALSE;
-  prepare_incremental_sweep(mrb, gc);
-  incremental_gc_finish(mrb, gc);
-  gc->generational = TRUE;
-  /* The gray objects have already been painted as white */
-  gc->gray_stack_top = 0;
-  gc->gray_overflow = FALSE;
-}
-
 MRB_API void
 mrb_incremental_gc(mrb_state *mrb)
 {
@@ -1321,36 +1263,14 @@ mrb_incremental_gc(mrb_state *mrb)
 
   if (gc->disabled || gc->iterating) return;
 
-  if (is_minor_gc(gc)) {
-    incremental_gc_finish(mrb, gc);
-  }
-  else {
-    incremental_gc_step(mrb, gc);
-  }
+  /* XXX: add non-incremental mode which calls incremental_gc_finish immediately */
+  incremental_gc_step(mrb, gc);
 
   if (gc->state == MRB_GC_STATE_ROOT) {
     mrb_assert(gc->live >= gc->live_after_mark);
     gc->threshold = (gc->live_after_mark/100) * gc->interval_ratio;
     if (gc->threshold < GC_STEP_SIZE) {
       gc->threshold = GC_STEP_SIZE;
-    }
-
-    if (is_major_gc(gc)) {
-      size_t threshold = gc->live_after_mark/100 * MAJOR_GC_INC_RATIO;
-
-      gc->full = FALSE;
-      if (threshold < MAJOR_GC_TOOMANY) {
-        gc->oldgen_threshold = threshold;
-      }
-      else {
-        /* too many objects allocated during incremental GC, */
-        /* instead of increasing threshold, invoke full GC. */
-        mrb_full_gc(mrb);
-      }
-    }
-    else if (is_minor_gc(gc) && gc->live > gc->oldgen_threshold) {
-      clear_all_old(mrb, gc);
-      gc->full = TRUE;
     }
   }
 }
@@ -1364,11 +1284,6 @@ mrb_full_gc(mrb_state *mrb)
   if (!mrb->c) return;
   if (gc->disabled || gc->iterating) return;
 
-  if (is_generational(gc)) {
-    /* clear all the old objects back to young */
-    clear_all_old(mrb, gc);
-    gc->full = TRUE;
-  }
   else if (gc->state != MRB_GC_STATE_ROOT) {
     /* finish half baked GC cycle */
     incremental_gc_finish(mrb, gc);
@@ -1376,11 +1291,6 @@ mrb_full_gc(mrb_state *mrb)
 
   incremental_gc_finish(mrb, gc);
   gc->threshold = (gc->live_after_mark/100) * gc->interval_ratio;
-
-  if (is_generational(gc)) {
-    gc->oldgen_threshold = gc->live_after_mark/100 * MAJOR_GC_INC_RATIO;
-    gc->full = FALSE;
-  }
 
 #ifdef MRB_USE_MALLOC_TRIM
   malloc_trim(0);
@@ -1409,9 +1319,9 @@ mrb_field_write_barrier(mrb_state *mrb, struct RBasic *obj, struct RBasic *value
   if (is_red(value)) return;
 
   mrb_assert(gc->state == MRB_GC_STATE_MARK || (!is_dead(gc, value) && !is_dead(gc, obj)));
-  mrb_assert(is_generational(gc) || gc->state != MRB_GC_STATE_ROOT);
+  mrb_assert(gc->state != MRB_GC_STATE_ROOT);
 
-  if (is_generational(gc) || gc->state == MRB_GC_STATE_MARK) {
+  if (gc->state == MRB_GC_STATE_MARK) {
     add_gray_list(gc, value);
   }
   else {
@@ -1437,7 +1347,7 @@ mrb_write_barrier(mrb_state *mrb, struct RBasic *obj)
   if (!is_black(obj)) return;
 
   mrb_assert(!is_dead(gc, obj));
-  mrb_assert(is_generational(gc) || gc->state != MRB_GC_STATE_ROOT);
+  mrb_assert(gc->state != MRB_GC_STATE_ROOT);
   paint_gray(obj);
   if (gc->gray_stack_top < MRB_GRAY_STACK_SIZE) {
     gc->gray_stack[gc->gray_stack_top++] = obj;
@@ -1574,61 +1484,6 @@ gc_step_ratio_set(mrb_state *mrb, mrb_value obj)
 }
 
 static void
-change_gen_gc_mode(mrb_state *mrb, mrb_gc *gc, mrb_bool enable)
-{
-  if (gc->disabled || gc->iterating) {
-    mrb_raise(mrb, E_RUNTIME_ERROR, "generational mode changed when GC disabled");
-    return;
-  }
-  if (is_generational(gc) && !enable) {
-    clear_all_old(mrb, gc);
-    mrb_assert(gc->state == MRB_GC_STATE_ROOT);
-    gc->full = FALSE;
-  }
-  else if (!is_generational(gc) && enable) {
-    incremental_gc_finish(mrb, gc);
-    gc->oldgen_threshold = gc->live_after_mark/100 * MAJOR_GC_INC_RATIO;
-    gc->full = FALSE;
-  }
-  gc->generational = enable;
-}
-
-/*
- *  call-seq:
- *     GC.generational_mode -> true or false
- *
- *  Returns generational or normal gc mode.
- *
- */
-
-static mrb_value
-gc_generational_mode_get(mrb_state *mrb, mrb_value self)
-{
-  return mrb_bool_value(mrb->gc.generational);
-}
-
-/*
- *  call-seq:
- *     GC.generational_mode = true or false -> true or false
- *
- *  Changes to generational or normal gc mode.
- *
- */
-
-static mrb_value
-gc_generational_mode_set(mrb_state *mrb, mrb_value self)
-{
-  mrb_bool enable;
-
-  mrb_get_args(mrb, "b", &enable);
-  if (mrb->gc.generational != enable)
-    change_gen_gc_mode(mrb, &mrb->gc, enable);
-
-  return mrb_bool_value(enable);
-}
-
-
-static void
 gc_each_objects(mrb_state *mrb, mrb_gc *gc, mrb_each_object_callback *callback, void *data)
 {
   mrb_heap_page* page;
@@ -1702,6 +1557,4 @@ mrb_init_gc(mrb_state *mrb)
   mrb_define_class_method_id(mrb, gc, MRB_SYM_E(interval_ratio), gc_interval_ratio_set, MRB_ARGS_REQ(1));
   mrb_define_class_method_id(mrb, gc, MRB_SYM(step_ratio), gc_step_ratio_get, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, gc, MRB_SYM_E(step_ratio), gc_step_ratio_set, MRB_ARGS_REQ(1));
-  mrb_define_class_method_id(mrb, gc, MRB_SYM_E(generational_mode), gc_generational_mode_set, MRB_ARGS_REQ(1));
-  mrb_define_class_method_id(mrb, gc, MRB_SYM(generational_mode), gc_generational_mode_get, MRB_ARGS_NONE());
 }
