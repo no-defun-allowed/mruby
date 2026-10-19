@@ -25,77 +25,9 @@
 #define imin(x,y) (((x)<(y))?(x):(y))
 #define dg(x,i) (((size_t)i < (x)->sz)?(x)->p[i]:0)
 
-#ifndef MRB_BIGINT_POOL_SIZE
-#define MRB_BIGINT_POOL_SIZE 512  /* 2KB on 32-bit, 4KB on 64-bit */
-#endif
-
-/* Scoped Memory Pool Infrastructure */
-#if MRB_BIGINT_POOL_SIZE == 0
-#define mpz_ctx_t mrb_state
+typedef mrb_state mpz_ctx_t;
 #define MPZ_MRB(ctx) (ctx)
-#define MPZ_HAS_POOL(ctx) (0)
 #define MPZ_CTX_INIT(mrb_ptr, ctx, pool_ptr) mrb_state *ctx = (mrb_ptr);
-#define pool_save(ctx) 0
-#define pool_restore(ctx, state) (void)state
-#define pool_alloc(pool, limbs) NULL
-#else
-typedef struct mpz_pool {
-  mp_limb data[MRB_BIGINT_POOL_SIZE];
-  size_t used;
-} mpz_pool_t;
-
-/* MPZ Context Architecture - unified parameter for mrb_state and optional pool */
-typedef struct mpz_context {
-  mrb_state *mrb;
-  mpz_pool_t *pool;  /* NULL for heap-only operations */
-} mpz_ctx_t;
-
-/* Convenience macros for context creation */
-#define MPZ_CTX_INIT(mrb_ptr, ctx, pool_ptr) \
-  mpz_pool_t pool ## _storage = {{0}};\
-  mpz_pool_t *pool_ptr = &pool ## _storage;\
-  mpz_ctx_t ctx ## _struct = ((mpz_ctx_t){.mrb = (mrb_ptr), .pool = (pool_ptr)}); \
-  mpz_ctx_t *ctx = &(ctx ## _struct);
-
-/* Access macros for readability */
-#define MPZ_MRB(ctx) ((ctx)->mrb)
-#define MPZ_POOL(ctx) ((ctx)->pool)
-#define MPZ_HAS_POOL(ctx) ((ctx)->pool != NULL)
-
-static size_t
-pool_save(mpz_ctx_t *ctx)
-{
-  mpz_pool_t *pool = MPZ_POOL(ctx);
-  return pool ? pool->used : 0;
-}
-
-static void
-pool_restore(mpz_ctx_t *ctx, size_t state)
-{
-  mpz_pool_t *pool = MPZ_POOL(ctx);
-  if (pool) {
-    pool->used = state;
-  }
-}
-
-/* Forward declarations */
-static void mpz_mul_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e);
-static void mpz_div_2exp(mpz_ctx_t *ctx, mpz_t *z, mpz_t *x, mrb_int e);
-static void mpz_set_int(mpz_ctx_t *ctx, mpz_t *y, mrb_int v);
-static void mpz_mul(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u, mpz_t *v);
-
-static mp_limb*
-pool_alloc(mpz_pool_t *pool, size_t limbs)
-{
-  if (!pool || pool->used + limbs > MRB_BIGINT_POOL_SIZE) {
-    return NULL;  /* Force fallback to heap */
-  }
-
-  mp_limb *ptr = &pool->data[pool->used];
-  pool->used += limbs;
-  return ptr;
-}
-#endif
 
 /* Zero n limbs at p */
 static inline void
@@ -133,41 +65,7 @@ mpz_init_heap(mpz_ctx_t *ctx, mpz_t *s, size_t hint)
   }
 }
 
-#if MRB_BIGINT_POOL_SIZE > 0
-/* Pool-preferred allocation (future: mpz_init_temp) */
-static void
-mpz_init_temp(mpz_ctx_t *ctx, mpz_t *s, size_t hint)
-{
-  s->sn = 0;
-
-
-  if (hint > 0 && MPZ_HAS_POOL(ctx)) {
-    mp_limb *pool_ptr = pool_alloc(MPZ_POOL(ctx), hint);
-    if (pool_ptr) {
-      s->p = pool_ptr;
-      s->sz = hint;
-      return;
-    }
-  }
-  /* Fallback to heap allocation */
-  mpz_init_heap(ctx, s, hint);
-}
-#else
 #define mpz_init_temp(ctx, s, hint) mpz_init_heap(ctx, s, hint)
-#endif
-
-/* Check if mpz_t uses pool memory */
-#if MRB_BIGINT_POOL_SIZE > 0
-static int
-is_pool_memory(mpz_t *z, mpz_pool_t *pool)
-{
-  if (!pool || !z->p) return 0;
-  uintptr_t ptr_addr = (uintptr_t)z->p;
-  uintptr_t pool_start = (uintptr_t)pool->data;
-  uintptr_t pool_end = pool_start + sizeof(pool->data);
-  return ptr_addr >= pool_start && ptr_addr < pool_end;
-}
-#endif
 
 static void
 mpz_realloc(mpz_ctx_t *ctx, mpz_t *x, size_t size)
@@ -180,25 +78,7 @@ mpz_realloc(mpz_ctx_t *ctx, mpz_t *x, size_t size)
     }
 
     size_t old_sz = x->sz;
-
-#if MRB_BIGINT_POOL_SIZE > 0
-    /* Pool memory cannot be reallocated - must use heap */
-    if (MPZ_HAS_POOL(ctx) && is_pool_memory(x, MPZ_POOL(ctx))) {
-      /* Allocate new heap memory and copy from pool */
-      mp_limb *new_p = (mp_limb*)mrb_malloc(MPZ_MRB(ctx), size * sizeof(mp_limb));
-      if (x->p) {
-        memcpy(new_p, x->p, old_sz * sizeof(mp_limb));
-      }
-      x->p = new_p;
-    }
-    else {
-#endif
-      /* Regular heap reallocation */
-      x->p = (mp_limb*)mrb_realloc(MPZ_MRB(ctx), x->p, size * sizeof(mp_limb));
-#if MRB_BIGINT_POOL_SIZE > 0
-    }
-#endif
-
+    x->p = (mp_limb*)mrb_realloc(MPZ_MRB(ctx), x->p, size * sizeof(mp_limb));
     /* Zero-initialize new limbs */
     mpn_zero(x->p + old_sz, size - old_sz);
     x->sz = size;
@@ -306,16 +186,7 @@ static void
 mpz_clear(mpz_ctx_t *ctx, mpz_t *s)
 {
   if (s->p) {
-#if MRB_BIGINT_POOL_SIZE > 0
-    if (MPZ_HAS_POOL(ctx) && is_pool_memory(s, MPZ_POOL(ctx))) {
-      /* Pool memory - don't free, just mark as unused */
-    }
-    else {
-      mrb_free(MPZ_MRB(ctx), s->p);
-    }
-#else
     mrb_free(MPZ_MRB(ctx), s->p);
-#endif
     s->p = NULL;
   }
   s->sn = 0;
@@ -325,14 +196,6 @@ mpz_clear(mpz_ctx_t *ctx, mpz_t *s)
 static void
 mpz_move(mpz_ctx_t *ctx, mpz_t *y, mpz_t *x)
 {
-#if MRB_BIGINT_POOL_SIZE > 0
-  if (MPZ_HAS_POOL(ctx) && is_pool_memory(x, MPZ_POOL(ctx))) {
-    /* Source is pool memory - use deep copy instead of pointer transfer */
-    mpz_set(ctx, y, x);
-    mpz_clear(ctx, x);
-    return;
-  }
-#endif
   /* Normal move: transfer ownership */
   mpz_clear(ctx, y);
   y->sn = x->sn;
@@ -972,7 +835,6 @@ static void
 div_limb(mpz_ctx_t *ctx, mpz_t *q, mpz_t *r, mpz_t *x, mp_limb d)
 {
   mrb_state *mrb = MPZ_MRB(ctx);
-  size_t pool_state = pool_save(ctx);
   mpz_t temp_q, temp_r;
   size_t n;
   mp_dbl_limb remainder;
@@ -980,7 +842,7 @@ div_limb(mpz_ctx_t *ctx, mpz_t *q, mpz_t *r, mpz_t *x, mp_limb d)
   if (zero_p(x)) {
     zero(q);
     zero(r);
-    goto cleanup;
+    return;
   }
 
   if (d == 0) {
@@ -1047,7 +909,7 @@ div_limb(mpz_ctx_t *ctx, mpz_t *q, mpz_t *r, mpz_t *x, mp_limb d)
     temp_r.sn = (temp_r.sz == 0) ? 0 : 1;
     mpz_move(ctx, q, &temp_q);
     mpz_move(ctx, r, &temp_r);
-    goto cleanup;
+    return;
   }
 
   /* General single-limb division */
@@ -1066,7 +928,7 @@ div_limb(mpz_ctx_t *ctx, mpz_t *q, mpz_t *r, mpz_t *x, mp_limb d)
     temp_r.sn = (temp_r.sz == 0) ? 0 : 1;
     mpz_move(ctx, q, &temp_q);
     mpz_move(ctx, r, &temp_r);
-    goto cleanup;
+    return;
   }
 
   /* Multi-limb dividend, single-limb divisor */
@@ -1095,9 +957,6 @@ div_limb(mpz_ctx_t *ctx, mpz_t *q, mpz_t *r, mpz_t *x, mp_limb d)
   /* Copy results to avoid pool/heap mixing */
   mpz_move(ctx, q, &temp_q);
   mpz_move(ctx, r, &temp_r);
-
-cleanup:
-  pool_restore(ctx, pool_state);
 }
 
 static void
@@ -1135,8 +994,6 @@ udiv(mpz_ctx_t *ctx, mpz_t *qq, mpz_t *rr, mpz_t *xx, mpz_t *yy)
     mrb_raise(mrb, E_RUNTIME_ERROR, "bigint size too large");
   }
 
-  /* Use new context architecture with automatic pool/heap management */
-  size_t pool_state = pool_save(ctx);
   mpz_t q, x, y;
   mpz_init_temp(ctx, &q, xx->sz - yy->sz + 1);  /* Quotient size estimate */
   mpz_init_temp(ctx, &x, xx->sz + 1);           /* Dividend with potential carry */
@@ -1158,7 +1015,6 @@ udiv(mpz_ctx_t *ctx, mpz_t *qq, mpz_t *rr, mpz_t *xx, mpz_t *yy)
     mpz_clear(ctx, &q);
     mpz_clear(ctx, &x);
     mpz_clear(ctx, &y);
-    pool_restore(ctx, pool_state);
     return;
   }
 
@@ -1252,7 +1108,6 @@ udiv(mpz_ctx_t *ctx, mpz_t *qq, mpz_t *rr, mpz_t *xx, mpz_t *yy)
   mpz_clear(ctx, &q);
   mpz_clear(ctx, &x);
   mpz_clear(ctx, &y);
-  pool_restore(ctx, pool_state);
 }
 
 static void
@@ -2089,7 +1944,6 @@ mpz_powm(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mpz_t *ex, mpz_t *n)
     }
   }
 
-  size_t pool_state = pool_save(ctx);
   mpz_t t, b;
   mpz_init_set_int(ctx, &t, 1);
   mpz_init_set(ctx, &b, x);
@@ -2115,7 +1969,6 @@ mpz_powm(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mpz_t *ex, mpz_t *n)
   mpz_clear(ctx, &t);
   mpz_clear(ctx, &b);
   mpz_clear(ctx, &temp);
-  pool_restore(ctx, pool_state);
 }
 
 static void
@@ -2130,7 +1983,6 @@ mpz_powm_i(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mrb_int ex, mpz_t *n)
     return;
   }
 
-  size_t pool_state = pool_save(ctx);
   mpz_t t, b;
   mpz_init_set_int(ctx, &t, 1);
   mpz_init_set(ctx, &b, x);
@@ -2153,7 +2005,6 @@ mpz_powm_i(mpz_ctx_t *ctx, mpz_t *zz, mpz_t *x, mrb_int ex, mpz_t *n)
   mpz_clear(ctx, &t);
   mpz_clear(ctx, &b);
   mpz_clear(ctx, &temp);
-  pool_restore(ctx, pool_state);
 }
 
 /* Helper functions for pool-based GCD operations */
@@ -2300,7 +2151,6 @@ mpz_power_of_2_p(mpz_t *x)
 static void
 mpz_gcd(mpz_ctx_t *ctx, mpz_t *gg, mpz_t *aa, mpz_t *bb)
 {
-  size_t pool_state = pool_save(ctx);
   mpz_t a, b;
   size_t shift;
   size_t a_zeros;
@@ -2309,11 +2159,11 @@ mpz_gcd(mpz_ctx_t *ctx, mpz_t *gg, mpz_t *aa, mpz_t *bb)
   /* Handle special cases */
   if (zero_p(aa)) {
     mpz_abs(ctx, gg, bb);
-    goto cleanup;
+    return;
   }
   if (zero_p(bb)) {
     mpz_abs(ctx, gg, aa);
-    goto cleanup;
+    return;
   }
 
   /* Fast path for single-limb numbers */
@@ -2332,7 +2182,7 @@ mpz_gcd(mpz_ctx_t *ctx, mpz_t *gg, mpz_t *aa, mpz_t *bb)
       gg->p[0] = result;
       gg->sn = 1;
     }
-    goto cleanup;
+    return;
   }
 
   /* Fast path for powers of 2 */
@@ -2343,7 +2193,7 @@ mpz_gcd(mpz_ctx_t *ctx, mpz_t *gg, mpz_t *aa, mpz_t *bb)
 
     mpz_init_set_int(ctx, gg, 1);
     mpz_mul_2exp(ctx, gg, gg, min_zeros);
-    goto cleanup;
+    return;
   }
   if (mpz_power_of_2_p(bb)) {
     a_zeros = mpz_trailing_zeros(aa);
@@ -2352,7 +2202,7 @@ mpz_gcd(mpz_ctx_t *ctx, mpz_t *gg, mpz_t *aa, mpz_t *bb)
 
     mpz_init_set_int(ctx, gg, 1);
     mpz_mul_2exp(ctx, gg, gg, min_zeros);
-    goto cleanup;
+    return;
   }
 
   mpz_init(ctx, &a);
@@ -2380,8 +2230,6 @@ mpz_gcd(mpz_ctx_t *ctx, mpz_t *gg, mpz_t *aa, mpz_t *bb)
   mpz_mul_2exp(ctx, gg, &a, shift);
   mpz_clear(ctx, &a);
   mpz_clear(ctx, &b);
-cleanup:
-  pool_restore(ctx, pool_state);
 }
 
 

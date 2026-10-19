@@ -49,7 +49,6 @@ typedef struct mrb_gc {
   size_t live;                     /* count of live objects */
   size_t live_after_mark;          /* old generation objects */
   size_t threshold;                /* threshold to start GC */
-  size_t oldgen_threshold;         /* threshold to kick major GC */
   mrb_gc_state state;              /* current state of gc */
   int interval_ratio;
   int step_ratio;
