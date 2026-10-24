@@ -38,4 +38,5 @@ MRuby::CrossBuild.new('underworld') do |conf|
   conf.gem 'mrbgems/mruby-enumerator/'
   conf.gem 'mrbgems/mruby-fiber/'
   conf.gem 'mrbgems/mruby-io/'
+  conf.gem 'mrbgems/mruby-method/'
 end
