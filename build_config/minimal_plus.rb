@@ -10,5 +10,7 @@ MRuby::CrossBuild.new('minimal_plus') do |conf|
 
   conf.gem 'mrbgems/mruby-bigint/'
   conf.gem 'mrbgems/mruby-compiler/'
+  conf.gem 'mrbgems/mruby-enumerator/'
+  conf.gem 'mrbgems/mruby-fiber/'
   conf.gem 'mrbgems/mruby-io/'
 end
