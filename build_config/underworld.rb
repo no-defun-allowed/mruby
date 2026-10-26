@@ -35,10 +35,10 @@ MRuby::CrossBuild.new('underworld') do |conf|
 
   conf.gem 'mrbgems/mruby-bigint/'
   conf.gem 'mrbgems/mruby-compiler/'
+  conf.gem 'mrbgems/mruby-data/'
   conf.gem 'mrbgems/mruby-enumerator/'
   conf.gem 'mrbgems/mruby-fiber/'
   conf.gem 'mrbgems/mruby-io/'
   conf.gem 'mrbgems/mruby-method/'
   conf.gem 'mrbgems/mruby-pack/'
-  conf.gem 'mrbgems/mruby-struct/'
 end
