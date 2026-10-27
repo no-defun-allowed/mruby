@@ -33,6 +33,7 @@ MRuby::CrossBuild.new('underworld') do |conf|
   # Do not build executable test
   conf.build_mrbtest_lib_only
 
+  conf.gem 'mrbgems/mruby-array-ext/'
   conf.gem 'mrbgems/mruby-bigint/'
   conf.gem 'mrbgems/mruby-compiler/'
   conf.gem 'mrbgems/mruby-data/'

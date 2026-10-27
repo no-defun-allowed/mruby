@@ -8,6 +8,7 @@ MRuby::CrossBuild.new('minimal_plus') do |conf|
 
   conf.gem 'mrbgems/mruby-bin-mirb/'
 
+  conf.gem 'mrbgems/mruby-array-ext/'
   conf.gem 'mrbgems/mruby-bigint/'
   conf.gem 'mrbgems/mruby-compiler/'
   conf.gem 'mrbgems/mruby-data/'
