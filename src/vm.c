@@ -3674,6 +3674,8 @@ RETRY_TRY_BLOCK:
     CASE(OP_ENTER1, Z) { a = 0x40000; goto L_OP_ENTER_BODY; }
     CASE(OP_ENTER2, Z) { a = 0x80000; goto L_OP_ENTER_BODY; }
     CASE(OP_C_MOVE, NN) { regs[a] = regs[b]; NEXT; }
+    CASE(OP_C_LOADSYM, NN) { goto L_OP_LOADSYM_BODY; }
+    CASE(OP_C_STRING, NN) { goto L_OP_STRING_BODY; }
   }
   END_DISPATCH;
 #undef regs

@@ -225,6 +225,7 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       print_lv_a(mrb, irep, a, out);
       break;
     CASE(OP_LOADSYM, BB):
+    L_LOADSYM:
       fprintf(out, "LOADSYM\tR%d\t:%s", a, mrb_sym_dump(mrb, irep->syms[b]));
       print_lv_a(mrb, irep, a, out);
       break;
@@ -543,6 +544,7 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       print_lv_a(mrb, irep, a, out);
       break;
     CASE(OP_STRING, BB):
+    L_STRING:
       mrb_assert((irep->pool[b].tt&IREP_TT_NFLAG)==0);
       fprintf(out, "STRING\tR%d\tL[%d]", a, b);
       if (irep->pool[b].u.str[0]) {
@@ -631,6 +633,8 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       fprintf(out, "C_MOVE\tR%d\tR%d", a, b);
       print_lv_ab(mrb, irep, a, b, out);
       break;
+    CASE(OP_C_LOADSYM, NN): goto L_LOADSYM;
+    CASE(OP_C_STRING, NN): goto L_STRING;
 
     CASE(OP_EXT1, Z):
       fprintf(out, "EXT1\n");

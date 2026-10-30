@@ -900,6 +900,24 @@ static void gen_move_op(codegen_scope *s, uint16_t dst, uint16_t src) {
     genop_2(s, OP_MOVE, dst, src);
 }
 
+static void gen_loadsym_op(codegen_scope *s, uint16_t dst, uint16_t src) {
+  if (dst < 16 && src < 16)
+    genop_1(s, OP_C_LOADSYM, dst << 4 | src);
+  else
+    genop_2(s, OP_LOADSYM, dst, src);
+}
+
+static mrb_bool is_string(struct mrb_insn_data d) {
+  return d.insn == OP_STRING || d.insn == OP_C_STRING;
+}
+
+static void gen_string_op(codegen_scope *s, uint16_t dst, uint16_t src) {
+  if (dst < 16 && src < 16)
+    genop_1(s, OP_C_STRING, dst << 4 | src);
+  else
+    genop_2(s, OP_STRING, dst, src);
+}
+
 /*
  * Generates an OP_MOVE instruction to copy the value from register `src` to register `dst`.
  *
@@ -962,9 +980,9 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       if (data.b != 0) break;
       /* fall through */
     case OP_LOADI8: case OP_LOADINEG:
-    case OP_LOADL: case OP_LOADSYM:
+    case OP_LOADL: case OP_LOADSYM: case OP_C_LOADSYM:
     case OP_GETGV: case OP_GETSV: case OP_GETIV: case OP_GETCV:
-    case OP_GETCONST: case OP_STRING:
+    case OP_GETCONST: case OP_STRING: case OP_C_STRING:
     case OP_LAMBDA: case OP_BLOCK: case OP_METHOD: case OP_BLKPUSH:
       if (data.a != src || data.a < s->nlocals) break;
       rewind_pc(s);
@@ -1363,7 +1381,7 @@ merge_op_string(codegen_scope *s, uint16_t dst, uint16_t b1, uint16_t b2, const 
   mrb_assert(pc < s->iseq + s->icapa);
   while (i<pc) {
     struct mrb_insn_data data = mrb_decode_insn(i);
-    if (data.insn == OP_STRING) {
+    if (is_string(data)) {
       if (data.b == b1) used |= 1;
       if (data.b == b2) used |= 2;
     }
@@ -1415,7 +1433,7 @@ merge_op_string(codegen_scope *s, uint16_t dst, uint16_t b1, uint16_t b2, const 
     }
   }
   s->pc = addr_pc(s, pc);
-  genop_2(s, OP_STRING, dst, off);
+  gen_string_op(s, dst, off);
 }
 
 /*
@@ -1457,9 +1475,9 @@ gen_addsub(codegen_scope *s, uint8_t op, uint16_t dst)
 
     if (!get_int_operand(s, &data, &n)) {
       /* not integer immediate */
-      if (op == OP_ADD && data.insn == OP_STRING) {
+      if (op == OP_ADD && is_string(data)) {
         struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-        if (data0.insn == OP_STRING) {
+        if (is_string(data0)) {
           merge_op_string(s, dst, data0.b, data.b, data0.addr);
           return;
         }
@@ -2529,7 +2547,7 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
           mrb_sym kw_sym = node_to_sym(kw->car);
 
           /* Load symbol (key) */
-          genop_2(s, OP_LOADSYM, cursp(), sym_idx(s, kw_sym));
+          gen_loadsym_op(s, cursp(), sym_idx(s, kw_sym));
           push();
 
           /* Load keyword local variable value */
@@ -3177,7 +3195,7 @@ gen_intern(codegen_scope *s)
   if (!no_peephole(s)) {
     struct mrb_insn_data data = mrb_last_insn(s);
 
-    if (data.insn == OP_STRING && data.a == cursp()) {
+    if (is_string(data) && data.a == cursp()) {
       rewind_pc(s);
       genop_2(s, OP_SYMBOL, data.a, data.b);
       push();
@@ -3538,7 +3556,7 @@ gen_string(codegen_scope *s, node *list, int val)
         const char *str = (char*)elem->cdr;
         if (!str) {str = ""; len = 0;}
         int off = new_lit_str(s, str, len);
-        genop_2(s, OP_STRING, cursp(), off);
+        gen_string_op(s, cursp(), off);
         push();
       }
       else {
@@ -4503,7 +4521,7 @@ static void
 gen_pat_key(codegen_scope *s, node *key)
 {
   if (node_type(key) == NODE_SYM) {
-    genop_2(s, OP_LOADSYM, cursp(), sym_idx(s, sym_node(key)->symbol));
+    gen_loadsym_op(s, cursp(), sym_idx(s, sym_node(key)->symbol));
   }
   else {
     codegen(s, key, VAL);
@@ -6067,7 +6085,7 @@ codegen_regx(codegen_scope *s, node *varnode, int val)
       /* Add flags (or nil if not present but encoding is) */
       if (n->flags && *n->flags) {
         off = new_lit_cstr(s, n->flags);
-        genop_2(s, OP_STRING, cursp(), off);
+        gen_string_op(s, cursp(), off);
       }
       else {
         genop_1(s, OP_LOADNIL, cursp());
@@ -6078,7 +6096,7 @@ codegen_regx(codegen_scope *s, node *varnode, int val)
       /* Add encoding if present */
       if (n->encoding && *n->encoding) {
         off = new_lit_cstr(s, n->encoding);
-        genop_2(s, OP_STRING, cursp(), off);
+        gen_string_op(s, cursp(), off);
         push();
         argc++;
       }
@@ -6588,7 +6606,10 @@ codegen(codegen_scope *s, node *tree, int val)
   case NODE_SYM:
     {
       int i = sym_idx(s, sym_node(tree)->symbol);
-      gen_load_op2(s, OP_LOADSYM, i, val);
+      if (val) {
+        gen_loadsym_op(s, cursp(), i);
+        push();
+      }
     }
     break;
 
