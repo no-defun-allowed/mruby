@@ -3669,6 +3669,11 @@ RETRY_TRY_BLOCK:
       TASK_STOP(mrb);
       return regs[irep->nlocals];
     }
+    /* Compressed instructions */
+    CASE(OP_ENTER0, Z) { a = 0; goto L_OP_ENTER_BODY; }
+    CASE(OP_ENTER1, Z) { a = 0x40000; goto L_OP_ENTER_BODY; }
+    CASE(OP_ENTER2, Z) { a = 0x80000; goto L_OP_ENTER_BODY; }
+    CASE(OP_C_MOVE, NN) { regs[a] = regs[b]; NEXT; }
   }
   END_DISPATCH;
 #undef regs

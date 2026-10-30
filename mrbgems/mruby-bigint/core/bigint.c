@@ -582,25 +582,6 @@ mpz_mul(mpz_ctx_t *ctx, mpz_t *ww, mpz_t *u, mpz_t *v)
   mpz_move(ctx, ww, &w);
 }
 
-/* Count set bits in a limb */
-static inline int
-limb_popcount(mp_limb x)
-{
-#if defined(__GNUC__) || __has_builtin(__builtin_popcount)
-  if (sizeof(mp_limb) == sizeof(unsigned long long))
-    return __builtin_popcountll(x);
-  else
-    return __builtin_popcount(x);
-#else
-  int count = 0;
-  while (x) {
-    count++;
-    x &= x - 1;  /* Clear lowest set bit */
-  }
-  return count;
-#endif
-}
-
 /* number of leading zero bits in digit */
 static int
 lzb(mp_limb x)

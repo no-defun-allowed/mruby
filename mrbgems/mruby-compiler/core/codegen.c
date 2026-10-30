@@ -602,6 +602,7 @@ mrb_decode_insn(const mrb_code *pc)
 #define Z 1
 #define S 3
 #define W 4
+#define NN 2
 #define OPCODE(_,x) x,
 /* instruction sizes */
 static uint8_t mrb_insn_size[] = {
@@ -834,6 +835,7 @@ genjmp2(codegen_scope *s, mrb_code i, uint16_t a, uint32_t pc, int val)
 
     switch (data.insn) {
     case OP_MOVE:
+    case OP_C_MOVE:
       if (data.a == a && data.a > s->nlocals) {
         rewind_pc(s);
         a = data.b;
@@ -887,6 +889,17 @@ genjmp2(codegen_scope *s, mrb_code i, uint16_t a, uint32_t pc, int val)
 static mrb_bool get_int_operand(codegen_scope *s, struct mrb_insn_data *data, mrb_int *ns);
 static void gen_int(codegen_scope *s, uint16_t dst, mrb_int i);
 
+static mrb_bool is_move(struct mrb_insn_data d) {
+  return d.insn == OP_MOVE || d.insn == OP_C_MOVE;
+}
+
+static void gen_move_op(codegen_scope *s, uint16_t dst, uint16_t src) {
+  if (dst < 16 && src < 16)
+    genop_1(s, OP_C_MOVE, dst << 4 | src);
+  else
+    genop_2(s, OP_MOVE, dst, src);
+}
+
 /*
  * Generates an OP_MOVE instruction to copy the value from register `src` to register `dst`.
  *
@@ -919,6 +932,7 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
 
     switch (data.insn) {
     case OP_MOVE:
+    case OP_C_MOVE:
       if (dst == src) return;   /* remove useless MOVE */
       if (data.a == src) {
         if (data.b == dst)      /* skip swapping MOVE */
@@ -992,7 +1006,7 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       if (addr_pc(s, data.addr) == s->lastlabel || data.a != src || data.a < s->nlocals) break;
       else {
         struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-        if (data0.insn != OP_MOVE || data0.a != data.a || data0.b != dst) break;
+        if (!is_move(data0) || data0.a != data.a || data0.b != dst) break;
         if (addr_pc(s, data0.addr) != s->lastlabel) {
           /* constant folding */
           struct mrb_insn_data data1 = mrb_decode_insn(mrb_prev_pc(s, data0.addr));
@@ -1017,9 +1031,7 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       break;
     }
   }
-
-  genop_2(s, OP_MOVE, dst, src);
-  return;
+  gen_move_op(s, dst, src);
 }
 
 /*
@@ -1106,7 +1118,7 @@ gen_setupvar(codegen_scope *s, uint16_t dst, mrb_sym id)
 
   if (!no_peephole(s)) {
     struct mrb_insn_data data = mrb_last_insn(s);
-    if (data.insn == OP_MOVE && data.a == dst) {
+    if (is_move(data) && data.a == dst) {
       dst = data.b;
       rewind_pc(s);
     }
@@ -1141,7 +1153,7 @@ gen_return(codegen_scope *s, uint8_t op, uint16_t src)
   else {
     struct mrb_insn_data data = mrb_last_insn(s);
 
-    if (data.insn == OP_MOVE && src == data.a) {
+    if (is_move(data) && src == data.a) {
       rewind_pc(s);
       genop_1(s, op, data.b);
     }
@@ -1573,7 +1585,7 @@ gen_binop(codegen_scope *s, mrb_sym op, uint16_t dst)
     struct mrb_insn_data data = mrb_last_insn(s);
     if (data.insn == OP_LOADI_0 && data.a == (uint32_t)dst+1 && addr_pc(s, data.addr) != s->lastlabel) {
       struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-      if (data0.insn == OP_MOVE && data0.a == dst && data0.b != dst) {
+      if (is_move(data0) && data0.a == dst && data0.b != dst) {
         s->pc = addr_pc(s, data0.addr);
         genop_2(s, OP_GETIDX0, dst, data0.b);
         return TRUE;
@@ -2124,7 +2136,7 @@ gen_setxv(codegen_scope *s, uint8_t op, uint16_t dst, mrb_sym sym, int val)
   int idx = sym_idx(s, sym);
   if (!val && !no_peephole(s)) {
     struct mrb_insn_data data = mrb_last_insn(s);
-    if (data.insn == OP_MOVE && data.a == dst) {
+    if (is_move(data) && data.a == dst) {
       dst = data.b;
       rewind_pc(s);
     }
@@ -2373,7 +2385,7 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
 
   /* Argument processing */
   if (args == NULL) { /* No arguments */
-    genop_W(s, OP_ENTER, 0); /* Generate OP_ENTER with no argument specification. */
+    genop_0(s, OP_ENTER0);
     s->ainfo = 0;
   }
   else { /* Has arguments */
@@ -2415,7 +2427,12 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
       | MRB_ARGS_POST(pa)
       | MRB_ARGS_KEY(ka, kd)
       | (ba ? MRB_ARGS_BLOCK() : 0);
-    genop_W(s, OP_ENTER, a);
+    switch (a) {
+    case 0: genop_0(s, OP_ENTER0); break;
+    case 0x40000: genop_0(s, OP_ENTER1); break;
+    case 0x80000: genop_0(s, OP_ENTER2); break;
+    default: genop_W(s, OP_ENTER, a);
+    }
     /* (13bits = 6:1:5:1:1) - Store argument counts for block argument passing (OP_BLKPUSH) */
     s->ainfo = (((ma+oa) & 0x3f) << 7)
       | ((ra & 0x1) << 6)
@@ -2516,7 +2533,7 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
           push();
 
           /* Load keyword local variable value */
-          genop_2(s, OP_MOVE, cursp(), lv_idx(s, kw_sym));
+          gen_move_op(s, cursp(), lv_idx(s, kw_sym));
           push();
 
           num_pairs++;
@@ -2526,12 +2543,12 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
         /* Create hash at current stack position, then move to keyword dict position */
         if (num_pairs > 0) {
           genop_2(s, OP_HASH, sp_save, num_pairs);
-          genop_2(s, OP_MOVE, kw_dict_pos, sp_save);
+          gen_move_op(s, kw_dict_pos, sp_save);
         }
         else {
           /* No keyword args, create empty hash */
           genop_2(s, OP_HASH, sp_save, 0);
-          genop_2(s, OP_MOVE, kw_dict_pos, sp_save);
+          gen_move_op(s, kw_dict_pos, sp_save);
         }
 
         /* Restore stack pointer */
@@ -2545,7 +2562,8 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
       pos = ma+oa+ra+pa+(ka||kd); /* Calculate register offset for the block parameter. */
       if (bparam) { /* If it's a named block parameter. */
         int idx = lv_idx(s, bparam);
-        genop_2(s, OP_MOVE, idx, pos+1); /* Move the block from its argument slot to the local variable. */
+        /* Move the block from its argument slot to the local variable. */
+        gen_move_op(s, idx, pos+1);
       }
     }
 
@@ -4232,7 +4250,7 @@ codegen_for(codegen_scope *s, node *varnode, int val)
   push();                       /* push for a block parameter */
 
   /* generate loop variable */
-  genop_W(s, OP_ENTER, 0x40000);
+  genop_0(s, OP_ENTER1);
   if (var->car && !var->car->cdr && !var->cdr) {
     gen_assignment(s, var->car->car, NULL, 1, NOVAL);
   }

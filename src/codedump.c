@@ -623,6 +623,15 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       fprintf(out, "STOP\n");
       break;
 
+      /* Compressed instructions */
+    CASE(OP_ENTER0, Z): fprintf(out, "ENTER0\n"); break;
+    CASE(OP_ENTER1, Z): fprintf(out, "ENTER1\n"); break;
+    CASE(OP_ENTER2, Z): fprintf(out, "ENTER2\n"); break;
+    CASE(OP_C_MOVE, NN):
+      fprintf(out, "C_MOVE\tR%d\tR%d", a, b);
+      print_lv_ab(mrb, irep, a, b, out);
+      break;
+
     CASE(OP_EXT1, Z):
       fprintf(out, "EXT1\n");
       print_header(mrb, irep, pc-irep->iseq, out);

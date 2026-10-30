@@ -423,8 +423,12 @@ mrb_proc_arity(const struct RProc *p)
 
   pc = irep->iseq;
   /* arity is depend on OP_ENTER */
-  if (*pc != OP_ENTER) {
-    return 0;
+  switch (*pc) {
+  case OP_ENTER0: return 0;
+  case OP_ENTER1: return 1;
+  case OP_ENTER2: return 2;
+  case OP_ENTER: break;
+  default: return 0;
   }
 
   aspec = PEEK_W(pc+1);
