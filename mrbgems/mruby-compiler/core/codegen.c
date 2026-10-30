@@ -375,6 +375,15 @@ genop_0(codegen_scope *s, mrb_code i)
   gen_B(s, i);
 }
 
+static void
+genop_NN(codegen_scope *s, mrb_code i, uint8_t a, uint8_t b)
+{
+  s->lastpc = s->pc;
+  check_no_ext_ops(s, a, 0);
+  gen_B(s, i);
+  gen_B(s, a << 4 | b);
+}
+
 /*
  * Generates an opcode `i` with a single 16-bit operand `a`.
  * If `a` is larger than 0xFF (255), it prepends `OP_EXT1` and emits `a` as a short.
@@ -893,18 +902,19 @@ static mrb_bool is_move(struct mrb_insn_data d) {
   return d.insn == OP_MOVE || d.insn == OP_C_MOVE;
 }
 
-static void gen_move_op(codegen_scope *s, uint16_t dst, uint16_t src) {
-  if (dst < 16 && src < 16)
-    genop_1(s, OP_C_MOVE, dst << 4 | src);
+static void gen_NN_op(codegen_scope *s, mrb_code compressed, mrb_code base, uint16_t a, uint16_t b) {
+  if (a < 16 && b < 16)
+    genop_NN(s, compressed, a, b);
   else
-    genop_2(s, OP_MOVE, dst, src);
+    genop_2(s, base, a, b);
+}
+
+static void gen_move_op(codegen_scope *s, uint16_t dst, uint16_t src) {
+  gen_NN_op(s, OP_C_MOVE, OP_MOVE, dst, src);
 }
 
 static void gen_loadsym_op(codegen_scope *s, uint16_t dst, uint16_t src) {
-  if (dst < 16 && src < 16)
-    genop_1(s, OP_C_LOADSYM, dst << 4 | src);
-  else
-    genop_2(s, OP_LOADSYM, dst, src);
+  gen_NN_op(s, OP_C_LOADSYM, OP_LOADSYM, dst, src);
 }
 
 static mrb_bool is_string(struct mrb_insn_data d) {
@@ -912,10 +922,7 @@ static mrb_bool is_string(struct mrb_insn_data d) {
 }
 
 static void gen_string_op(codegen_scope *s, uint16_t dst, uint16_t src) {
-  if (dst < 16 && src < 16)
-    genop_1(s, OP_C_STRING, dst << 4 | src);
-  else
-    genop_2(s, OP_STRING, dst, src);
+  gen_NN_op(s, OP_C_STRING, OP_STRING, dst, src);
 }
 
 /*
@@ -1197,7 +1204,10 @@ gen_return(codegen_scope *s, uint8_t op, uint16_t src)
     }
     else if (data.insn != OP_RETURN && data.insn != OP_RETSELF && data.insn != OP_RETNIL &&
              data.insn != OP_RETTRUE && data.insn != OP_RETFALSE) {
-      genop_1(s, op, src);
+      if (op == OP_RETURN && src < 8)
+        genop_0(s, OP_RETURN0 + src);
+      else
+        genop_1(s, op, src);
     }
   }
 }
@@ -3710,14 +3720,20 @@ codegen_call(codegen_scope *s, node *varnode, int val)
   }
   else if (noself) {
     if (!blk && n == 0 && nk == 0) {
-      genop_2(s, OP_SSEND0, cursp(), sym_idx(s, sym));
+      gen_NN_op(s, OP_C_SSEND0, OP_SSEND0, cursp(), sym_idx(s, sym));
+    }
+    else if (!blk && n == 1 && nk == 0) {
+      gen_NN_op(s, OP_C_SSEND1, OP_SSEND1, cursp(), sym_idx(s, sym));
     }
     else {
       genop_3(s, blk ? OP_SSENDB : OP_SSEND, cursp(), sym_idx(s, sym), n|(nk<<4));
     }
   }
   else if (!blk && n == 0 && nk == 0) {
-    genop_2(s, OP_SEND0, cursp(), sym_idx(s, sym));
+    gen_NN_op(s, OP_C_SEND0, OP_SEND0, cursp(), sym_idx(s, sym));
+  }
+  else if (!blk && n == 1 && nk == 0) {
+    gen_NN_op(s, OP_C_SEND1, OP_SEND1, cursp(), sym_idx(s, sym));
   }
   else {
     genop_3(s, blk ? OP_SENDB : OP_SEND, cursp(), sym_idx(s, sym), n|(nk<<4));

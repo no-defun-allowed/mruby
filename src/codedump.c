@@ -653,6 +653,36 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       }
       print_lv_a(mrb, irep, a, out);
       break;
+    CASE(OP_RETURN0, Z): fprintf(out, "RETURN0\n"); break;
+    CASE(OP_RETURN1, Z): fprintf(out, "RETURN1\n"); break;
+    CASE(OP_RETURN2, Z): fprintf(out, "RETURN2\n"); break;
+    CASE(OP_RETURN3, Z): fprintf(out, "RETURN3\n"); break;
+    CASE(OP_RETURN4, Z): fprintf(out, "RETURN4\n"); break;
+    CASE(OP_RETURN5, Z): fprintf(out, "RETURN5\n"); break;
+    CASE(OP_RETURN6, Z): fprintf(out, "RETURN6\n"); break;
+    CASE(OP_RETURN7, Z): fprintf(out, "RETURN7\n"); break;
+    CASE(OP_C_SSEND0, NN):
+      fprintf(out, "C_SSEND0\tR%d\t:%s\n", a, mrb_sym_dump(mrb, irep->syms[b]));
+      break;
+    CASE(OP_C_SEND0, NN):
+      fprintf(out, "C_SEND0\tR%d\t:%s\n", a, mrb_sym_dump(mrb, irep->syms[b]));
+      break;
+    CASE(OP_C_SSEND1, NN):
+      fprintf(out, "C_SSEND\tR%d\t:%s\t", a, mrb_sym_dump(mrb, irep->syms[b]));
+      print_args(1, out);
+      break;
+    CASE(OP_C_SEND1, NN):
+      fprintf(out, "C_SEND1\tR%d\t:%s\t", a, mrb_sym_dump(mrb, irep->syms[b]));
+      print_args(1, out);
+      break;
+    CASE(OP_SSEND1, BB):
+      fprintf(out, "SSEND1\tR%d\t:%s\t", a, mrb_sym_dump(mrb, irep->syms[b]));
+      print_args(1, out);
+      break;
+    CASE(OP_SEND1, BB):
+      fprintf(out, "SEND\t\tR%d\t:%s\t", a, mrb_sym_dump(mrb, irep->syms[b]));
+      print_args(1, out);
+      break;
 
     CASE(OP_EXT1, Z):
       fprintf(out, "EXT1\n");

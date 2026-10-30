@@ -3676,6 +3676,20 @@ RETRY_TRY_BLOCK:
     CASE(OP_C_MOVE, NN) { regs[a] = regs[b]; NEXT; }
     CASE(OP_C_LOADSYM, NN) { goto L_OP_LOADSYM_BODY; }
     CASE(OP_C_STRING, NN) { goto L_OP_STRING_BODY; }
+    CASE(OP_RETURN0, Z) { a = 0; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN1, Z) { a = 1; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN2, Z) { a = 2; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN3, Z) { a = 3; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN4, Z) { a = 4; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN5, Z) { a = 5; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN6, Z) { a = 6; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN7, Z) { a = 7; goto L_OP_RETURN_BODY; }
+    CASE(OP_C_SEND0, NN) { c = 0; goto L_SENDB; }
+    CASE(OP_C_SSEND0, NN) { regs[a] = regs[0]; c = 0; goto L_SENDB; }
+    CASE(OP_C_SEND1, NN) { c = 1; goto L_SENDB; }
+    CASE(OP_C_SSEND1, NN) { regs[a] = regs[0]; c = 1; goto L_SENDB; }
+    CASE(OP_SEND1, BB) { c = 1; goto L_SENDB; }
+    CASE(OP_SSEND1, BB) { regs[a] = regs[0]; c = 1; goto L_SENDB; }
   }
   END_DISPATCH;
 #undef regs
