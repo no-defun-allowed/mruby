@@ -1733,7 +1733,6 @@ RETRY_TRY_BLOCK:
     #pragma GCC diagnostic pop
   #endif
 #endif
-
   INIT_DISPATCH {
     CASE(OP_NOP, Z) {
       /* do nothing */
@@ -2292,7 +2291,8 @@ RETRY_TRY_BLOCK:
       }
 
       mrb_assert(bidx < irep->nregs);
-      if (insn == OP_SEND || insn == OP_SEND0 || insn == OP_SSEND || insn == OP_SSEND0) {
+      if (insn == OP_SEND || insn == OP_SEND0 || insn == OP_C_SEND0 || insn == OP_SEND1 || insn == OP_C_SEND1 ||
+          insn == OP_SSEND || insn == OP_SSEND0 || insn == OP_C_SSEND0 || insn == OP_SSEND1 || insn == OP_C_SSEND1) {
         /* clear block argument */
         SET_NIL_VALUE(regs[new_bidx]);
         SET_NIL_VALUE(blk);
@@ -3676,14 +3676,14 @@ RETRY_TRY_BLOCK:
     CASE(OP_C_MOVE, NN) { regs[a] = regs[b]; NEXT; }
     CASE(OP_C_LOADSYM, NN) { goto L_OP_LOADSYM_BODY; }
     CASE(OP_C_STRING, NN) { goto L_OP_STRING_BODY; }
-    CASE(OP_RETURN0, Z) { a = 0; goto L_OP_RETURN_BODY; }
-    CASE(OP_RETURN1, Z) { a = 1; goto L_OP_RETURN_BODY; }
-    CASE(OP_RETURN2, Z) { a = 2; goto L_OP_RETURN_BODY; }
-    CASE(OP_RETURN3, Z) { a = 3; goto L_OP_RETURN_BODY; }
-    CASE(OP_RETURN4, Z) { a = 4; goto L_OP_RETURN_BODY; }
-    CASE(OP_RETURN5, Z) { a = 5; goto L_OP_RETURN_BODY; }
-    CASE(OP_RETURN6, Z) { a = 6; goto L_OP_RETURN_BODY; }
-    CASE(OP_RETURN7, Z) { a = 7; goto L_OP_RETURN_BODY; }
+    CASE(OP_RETURN0, Z) { a = 0; goto NORMAL_RETURN; }
+    CASE(OP_RETURN1, Z) { a = 1; goto NORMAL_RETURN; }
+    CASE(OP_RETURN2, Z) { a = 2; goto NORMAL_RETURN; }
+    CASE(OP_RETURN3, Z) { a = 3; goto NORMAL_RETURN; }
+    CASE(OP_RETURN4, Z) { a = 4; goto NORMAL_RETURN; }
+    CASE(OP_RETURN5, Z) { a = 5; goto NORMAL_RETURN; }
+    CASE(OP_RETURN6, Z) { a = 6; goto NORMAL_RETURN; }
+    CASE(OP_RETURN7, Z) { a = 7; goto NORMAL_RETURN; }
     CASE(OP_C_SEND0, NN) { c = 0; goto L_SENDB; }
     CASE(OP_C_SSEND0, NN) { regs[a] = regs[0]; c = 0; goto L_SENDB; }
     CASE(OP_C_SEND1, NN) { c = 1; goto L_SENDB; }
