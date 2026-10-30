@@ -92,14 +92,24 @@ print_args(uint16_t i, FILE *out)
 
 #define CASE(insn,ops) case insn: FETCH_ ## ops (); L_ ## insn
 
+static int debug_size(const mrb_irep *irep) {
+  if (!irep->debug_info) return 0;
+  int sum = 0;
+  for (int i = 0; i < irep->debug_info->flen; i++)
+    if (irep->debug_info->files[i])
+      sum += irep->debug_info->files[i]->line_entry_count;
+  return sum;
+}
+
 static void
 codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
 {
   const char *file = NULL;
 
   if (!irep) return;
-  fprintf(out, "irep %p nregs=%d nlocals=%d pools=%d syms=%d reps=%d ilen=%d\n", (void*)irep,
-          irep->nregs, irep->nlocals, (int)irep->plen, (int)irep->slen, (int)irep->rlen, (int)irep->ilen);
+  fprintf(out, "irep %p nregs=%d nlocals=%d pools=%d syms=%d reps=%d ilen=%d dlen=%d\n", (void*)irep,
+          irep->nregs, irep->nlocals, (int)irep->plen, (int)irep->slen, (int)irep->rlen, (int)irep->ilen,
+          debug_size(irep));
 
   if (irep->lv) {
     int head = FALSE;
@@ -225,7 +235,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       print_lv_a(mrb, irep, a, out);
       break;
     CASE(OP_LOADSYM, BB):
-    L_LOADSYM:
       fprintf(out, "LOADSYM\tR%d\t:%s", a, mrb_sym_dump(mrb, irep->syms[b]));
       print_lv_a(mrb, irep, a, out);
       break;
@@ -544,7 +553,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       print_lv_a(mrb, irep, a, out);
       break;
     CASE(OP_STRING, BB):
-    L_STRING:
       mrb_assert((irep->pool[b].tt&IREP_TT_NFLAG)==0);
       fprintf(out, "STRING\tR%d\tL[%d]", a, b);
       if (irep->pool[b].u.str[0]) {
@@ -633,8 +641,18 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       fprintf(out, "C_MOVE\tR%d\tR%d", a, b);
       print_lv_ab(mrb, irep, a, b, out);
       break;
-    CASE(OP_C_LOADSYM, NN): goto L_LOADSYM;
-    CASE(OP_C_STRING, NN): goto L_STRING;
+    CASE(OP_C_LOADSYM, NN):
+      fprintf(out, "C_LOADSYM\tR%d\t:%s", a, mrb_sym_dump(mrb, irep->syms[b]));
+      print_lv_a(mrb, irep, a, out);
+      break;
+    CASE(OP_C_STRING, NN):
+      mrb_assert((irep->pool[b].tt&IREP_TT_NFLAG)==0);
+      fprintf(out, "C_STRING\tR%d\tL[%d]", a, b);
+      if (irep->pool[b].u.str[0]) {
+        fprintf(out, "\t; %s", irep->pool[b].u.str);
+      }
+      print_lv_a(mrb, irep, a, out);
+      break;
 
     CASE(OP_EXT1, Z):
       fprintf(out, "EXT1\n");

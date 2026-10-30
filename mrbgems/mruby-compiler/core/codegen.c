@@ -980,9 +980,9 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       if (data.b != 0) break;
       /* fall through */
     case OP_LOADI8: case OP_LOADINEG:
-    case OP_LOADL: case OP_LOADSYM: case OP_C_LOADSYM:
+    case OP_LOADL: case OP_LOADSYM:
     case OP_GETGV: case OP_GETSV: case OP_GETIV: case OP_GETCV:
-    case OP_GETCONST: case OP_STRING: case OP_C_STRING:
+    case OP_GETCONST: case OP_STRING:
     case OP_LAMBDA: case OP_BLOCK: case OP_METHOD: case OP_BLKPUSH:
       if (data.a != src || data.a < s->nlocals) break;
       rewind_pc(s);
