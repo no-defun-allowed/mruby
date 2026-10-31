@@ -858,9 +858,7 @@ genjmp2(codegen_scope *s, mrb_code i, uint16_t a, uint32_t pc, int val)
         }
       }
       break;
-    case OP_LOADTRUE: case OP_LOADI8: case OP_LOADINEG: case OP_LOADI__1:
-    case OP_LOADI_0: case OP_LOADI_1: case OP_LOADI_2: case OP_LOADI_3:
-    case OP_LOADI_4: case OP_LOADI_5: case OP_LOADI_6: case OP_LOADI_7:
+    case OP_LOADTRUE: case OP_LOADI8: case OP_LOADINEG:
       if (data.a == a || data.a > s->nlocals) {
         s->pc = addr_pc(s, data.addr);
         if (i == OP_JMPIF) {
@@ -942,10 +940,7 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
         return;
       }
       break;
-    case OP_LOADNIL: case OP_LOADSELF: case OP_LOADTRUE: case OP_LOADFALSE:
-    case OP_LOADI__1:
-    case OP_LOADI_0: case OP_LOADI_1: case OP_LOADI_2: case OP_LOADI_3:
-    case OP_LOADI_4: case OP_LOADI_5: case OP_LOADI_6: case OP_LOADI_7:
+    case OP_LOADNIL: case OP_LOADTRUE: case OP_LOADFALSE:
       if (data.a != src || data.a < s->nlocals) break;
       rewind_pc(s);
       genop_1(s, data.insn, dst);
@@ -953,13 +948,12 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
     case OP_HASH:
       if (data.b != 0) break;
       /* fall through */
-    case OP_LOADI8: case OP_LOADINEG:
-    case OP_LOADL:
     case OP_LAMBDA: case OP_METHOD: case OP_BLKPUSH:
       if (data.a != src || data.a < s->nlocals) break;
       rewind_pc(s);
       genop_2(s, data.insn, dst, data.b);
       return;
+    case OP_LOADI8: case OP_LOADINEG: case OP_LOADL:
     case OP_GETCONST: case OP_LOADSYM: case OP_STRING:
     case OP_GETGV: case OP_GETSV: case OP_GETIV: case OP_GETCV:
     case OP_BLOCK:
@@ -1152,30 +1146,9 @@ gen_return(codegen_scope *s, uint8_t op, uint16_t src)
 
     if (data.insn == OP_MOVE && src == data.a) {
       rewind_pc(s);
-      genop_1(s, op, data.b);
+      src = data.b;
     }
-    else if (data.insn == OP_LOADSELF && src == data.a && op == OP_RETURN) {
-      /* LOADSELF + RETURN -> RETSELF */
-      rewind_pc(s);
-      genop_0(s, OP_RETSELF);
-    }
-    else if (data.insn == OP_LOADNIL && src == data.a && op == OP_RETURN) {
-      /* LOADNIL + RETURN -> RETNIL */
-      rewind_pc(s);
-      genop_0(s, OP_RETNIL);
-    }
-    else if (data.insn == OP_LOADTRUE && src == data.a && op == OP_RETURN) {
-      /* LOADTRUE + RETURN -> RETTRUE */
-      rewind_pc(s);
-      genop_0(s, OP_RETTRUE);
-    }
-    else if (data.insn == OP_LOADFALSE && src == data.a && op == OP_RETURN) {
-      /* LOADFALSE + RETURN -> RETFALSE */
-      rewind_pc(s);
-      genop_0(s, OP_RETFALSE);
-    }
-    else if (data.insn != OP_RETURN && data.insn != OP_RETSELF && data.insn != OP_RETNIL &&
-             data.insn != OP_RETTRUE && data.insn != OP_RETFALSE) {
+    if (data.insn != OP_RETURN) {
       if (op == OP_RETURN && src < 8)
         genop_0(s, OP_RETURN0 + src);
       else
@@ -1188,9 +1161,8 @@ gen_return(codegen_scope *s, uint8_t op, uint16_t src)
  * Attempts to extract a compile-time integer value from a given instruction.
  *
  * This function checks if the instruction described by `data` is one of
- * the integer loading opcodes (e.g., `OP_LOADI__1`, `OP_LOADINEG`, `OP_LOADI_0`
- * through `OP_LOADI_7`, `OP_LOADI8`, `OP_LOADI16`, `OP_LOADI32`) or `OP_LOADL`
- * where the literal pool entry is an integer.
+ * the integer loading opcodes (e.g., `OP_LOADI8`, `OP_LOADI16`, `OP_LOADI32`
+ * or `OP_LOADL` where the literal pool entry is an integer.
  *
  * If successful, it stores the extracted integer value into the output
  * parameter `*n` and returns `TRUE`. Otherwise, it returns `FALSE`.
@@ -1205,17 +1177,8 @@ static mrb_bool
 get_int_operand(codegen_scope *s, struct mrb_insn_data *data, mrb_int *n)
 {
   switch (data->insn) {
-  case OP_LOADI__1:
-    *n = -1;
-    return TRUE;
-
   case OP_LOADINEG:
     *n = -data->b;
-    return TRUE;
-
-  case OP_LOADI_0: case OP_LOADI_1: case OP_LOADI_2: case OP_LOADI_3:
-  case OP_LOADI_4: case OP_LOADI_5: case OP_LOADI_6: case OP_LOADI_7:
-    *n = data->insn - OP_LOADI_0;
     return TRUE;
 
   case OP_LOADI8:
@@ -1581,16 +1544,6 @@ gen_binop(codegen_scope *s, mrb_sym op, uint16_t dst)
 {
   if (no_peephole(s)) return FALSE;
   else if (op == MRB_OPSYM(aref)) {
-    /* GETIDX0 fusion: MOVE dst arr; LOADI_0 dst+1 -> GETIDX0 dst arr */
-    struct mrb_insn_data data = mrb_last_insn(s);
-    if (data.insn == OP_LOADI_0 && data.a == (uint32_t)dst+1 && addr_pc(s, data.addr) != s->lastlabel) {
-      struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-      if (data0.insn == OP_MOVE && data0.a == dst && data0.b != dst) {
-        s->pc = addr_pc(s, data0.addr);
-        genop_2(s, OP_GETIDX0, dst, data0.b);
-        return TRUE;
-      }
-    }
     genop_1(s, OP_GETIDX, dst);
     return TRUE;
   }
@@ -1784,14 +1737,6 @@ gen_load_op1(codegen_scope *s, mrb_code op, int val)
 }
 
 static void
-gen_load_op2(codegen_scope *s, mrb_code op, uint16_t arg, int val)
-{
-  if (!val) return;
-  genop_2(s, op, cursp(), arg);
-  push();
-}
-
-static void
 gen_load_opNN(codegen_scope *s, mrb_code op, uint16_t arg, int val)
 {
   if (!val) return;
@@ -1812,7 +1757,7 @@ gen_load_nil(codegen_scope *s, int val)
 static void
 gen_load_lit(codegen_scope *s, int off)
 {
-  genop_2(s, OP_LOADL, cursp(), off);
+  genop_NN(s, OP_LOADL, cursp(), off);
   push();
 }
 
@@ -2157,11 +2102,9 @@ gen_setxv(codegen_scope *s, uint8_t op, uint16_t dst, mrb_sym sym, int val)
  * into the destination register `dst`.
  *
  * It employs a series of checks to use specialized, shorter opcodes for common integer values:
- * - `OP_LOADI__1` for -1.
  * - `OP_LOADINEG` for negative integers between -255 and -2 (operand is positive magnitude).
  * - `OP_LOADI16` for negative integers fitting in a signed 16-bit integer (INT16_MIN to -256).
  * - `OP_LOADI32` for negative integers fitting in a signed 32-bit integer (INT32_MIN to not fitting in 16-bit).
- * - `OP_LOADI_0` through `OP_LOADI_7` for integers 0 through 7.
  * - `OP_LOADI8` for positive integers between 8 and 255.
  * - `OP_LOADI16` for positive integers fitting in a signed 16-bit integer (256 to INT16_MAX).
  * - `OP_LOADI32` for positive integers fitting in a signed 32-bit integer (not fitting in 16-bit to INT32_MAX).
@@ -2179,19 +2122,15 @@ static void
 gen_int(codegen_scope *s, uint16_t dst, mrb_int i)
 {
   if (i < 0) {
-    if (i == -1) genop_1(s, OP_LOADI__1, dst);
-    else if (i >= -0xff) genop_2(s, OP_LOADINEG, dst, (uint16_t)-i);
+    if (i >= -0xff) genop_NN(s, OP_LOADINEG, dst, (uint16_t)-i);
     else if (i >= INT16_MIN) genop_2S(s, OP_LOADI16, dst, (uint16_t)i);
     else if (i >= INT32_MIN) genop_2SS(s, OP_LOADI32, dst, (uint32_t)i);
-    else goto int_lit;
-  }
-  else if (i < 8) genop_1(s, OP_LOADI_0 + (uint8_t)i, dst);
-  else if (i <= 0xff) genop_2(s, OP_LOADI8, dst, (uint16_t)i);
-  else if (i <= INT16_MAX) genop_2S(s, OP_LOADI16, dst, (uint16_t)i);
-  else if (i <= INT32_MAX) genop_2SS(s, OP_LOADI32, dst, (uint32_t)i);
-  else {
-  int_lit:
-    genop_2(s, OP_LOADL, dst, new_lit_int(s, i));
+    else genop_NN(s, OP_LOADL, dst, new_lit_int(s, i));
+  } else {
+    if (i <= 0xff) genop_NN(s, OP_LOADI8, dst, (uint16_t)i);
+    else if (i <= INT16_MAX) genop_2S(s, OP_LOADI16, dst, (uint16_t)i);
+    else if (i <= INT32_MAX) genop_2SS(s, OP_LOADI32, dst, (uint32_t)i);
+    else genop_NN(s, OP_LOADL, dst, new_lit_int(s, i));
   }
 }
 
@@ -5819,15 +5758,14 @@ codegen_float(codegen_scope *s, node *varnode, int val)
   mrb_read_float(value, NULL, &f);
   int off = new_lit_float(s, (mrb_float)f);
 
-  gen_load_op2(s, OP_LOADL, off, val);
+  gen_load_opNN(s, OP_LOADL, off, val);
 }
 
 /* Variable-sized simple node generation functions */
 static void
 codegen_self(codegen_scope *s, node *varnode, int val)
 {
-  /* Use traditional self codegen logic */
-  gen_load_op1(s, OP_LOADSELF, val);
+  gen_load_opNN(s, OP_MOVE, 0, val);
 }
 
 static void
@@ -6220,7 +6158,7 @@ codegen_negate(codegen_scope *s, node *varnode, int val)
       if (value == INT32_MIN) {
         /* -INT32_MIN overflows, use bigint */
         int off = new_litbint(s, "2147483648", -10);
-        genop_2(s, OP_LOADL, cursp(), off);
+        genop_NN(s, OP_LOADL, cursp(), off);
       }
       else {
         gen_int(s, cursp(), -value);
@@ -6235,7 +6173,7 @@ codegen_negate(codegen_scope *s, node *varnode, int val)
       int base = bigint_node(tree)->base;
       /* Negate base to indicate negative number */
       int off = new_litbint(s, str, -base);
-      genop_2(s, OP_LOADL, cursp(), off);
+      genop_NN(s, OP_LOADL, cursp(), off);
       push();
     }
     break;
@@ -6598,7 +6536,7 @@ codegen(codegen_scope *s, node *tree, int val)
       char *str = bigint_node(tree)->string;
       int base = bigint_node(tree)->base;
       int off = new_litbint(s, str, base);
-      genop_2(s, OP_LOADL, cursp(), off);
+      genop_NN(s, OP_LOADL, cursp(), off);
       push();
     }
     break;

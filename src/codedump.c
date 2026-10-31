@@ -189,7 +189,7 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       print_lv_ab(mrb, irep, a, b, out);
       break;
 
-    CASE(OP_LOADL, BB):
+    CASE(OP_LOADL, NN):
       switch (irep->pool[b].tt) {
 #ifndef MRB_NO_FLOAT
       case IREP_TT_FLOAT:
@@ -210,11 +210,11 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       }
       print_lv_a(mrb, irep, a, out);
       break;
-    CASE(OP_LOADI8, BB):
+    CASE(OP_LOADI8, NN):
       fprintf(out, "LOADI8\tR%d\t%d", a, b);
       print_lv_a(mrb, irep, a, out);
       break;
-    CASE(OP_LOADINEG, BB):
+    CASE(OP_LOADINEG, NN):
       fprintf(out, "LOADINEG\tR%d\t-%d", a, b);
       print_lv_a(mrb, irep, a, out);
       break;
@@ -226,33 +226,12 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       fprintf(out, "LOADI32\tR%d\t%d", a, (int32_t)(((uint32_t)b<<16)+c));
       print_lv_a(mrb, irep, a, out);
       break;
-    CASE(OP_LOADI__1, B):
-      fprintf(out, "LOADI__1\tR%d\t(-1)", a);
-      print_lv_a(mrb, irep, a, out);
-      break;
-    CASE(OP_LOADI_0, B): goto L_LOADI;
-    CASE(OP_LOADI_1, B): goto L_LOADI;
-    CASE(OP_LOADI_2, B): goto L_LOADI;
-    CASE(OP_LOADI_3, B): goto L_LOADI;
-    CASE(OP_LOADI_4, B): goto L_LOADI;
-    CASE(OP_LOADI_5, B): goto L_LOADI;
-    CASE(OP_LOADI_6, B): goto L_LOADI;
-    CASE(OP_LOADI_7, B):
-    L_LOADI:
-      b = ins-(int)OP_LOADI_0;
-      fprintf(out, "LOADI_%d\tR%d\t(%d)", b, a, b);
-      print_lv_a(mrb, irep, a, out);
-      break;
     CASE(OP_LOADSYM, NN):
       fprintf(out, "LOADSYM\tR%d\t:%s", a, mrb_sym_dump(mrb, irep->syms[b]));
       print_lv_a(mrb, irep, a, out);
       break;
     CASE(OP_LOADNIL, B):
       fprintf(out, "LOADNIL\tR%d\t(nil)", a);
-      print_lv_a(mrb, irep, a, out);
-      break;
-    CASE(OP_LOADSELF, B):
-      fprintf(out, "LOADSELF\tR%d\t(R0)", a);
       print_lv_a(mrb, irep, a, out);
       break;
     CASE(OP_LOADTRUE, B):
@@ -321,9 +300,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       break;
     CASE(OP_GETIDX, B):
       fprintf(out, "GETIDX\tR%d\t(R%d)\n", a, a+1);
-      break;
-    CASE(OP_GETIDX0, BB):
-      fprintf(out, "GETIDX0\tR%d\tR%d[0]\n", a, b);
       break;
     CASE(OP_SETIDX, B):
       fprintf(out, "SETIDX\tR%d\t(R%d)\t(R%d)\n", a, a+1, a+2);
@@ -421,18 +397,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
     CASE(OP_RETURN_BLK, B):
       fprintf(out, "RETURN_BLK\tR%d\t", a);
       print_lv_a(mrb, irep, a, out);
-      break;
-    CASE(OP_RETSELF, Z):
-      fprintf(out, "RETSELF\n");
-      break;
-    CASE(OP_RETNIL, Z):
-      fprintf(out, "RETNIL\n");
-      break;
-    CASE(OP_RETTRUE, Z):
-      fprintf(out, "RETTRUE\n");
-      break;
-    CASE(OP_RETFALSE, Z):
-      fprintf(out, "RETFALSE\n");
       break;
     CASE(OP_BREAK, B):
       fprintf(out, "BREAK\t\tR%d\t", a);

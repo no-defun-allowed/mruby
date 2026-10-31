@@ -1744,7 +1744,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_LOADL, BB) {
+    CASE(OP_LOADL, NN) {
       switch (irep->pool[b].tt) {   /* number */
       case IREP_TT_INT32:
         regs[a] = mrb_int_value(mrb, (mrb_int)irep->pool[b].u.i32);
@@ -1785,27 +1785,13 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_LOADI8, BB) {
+    CASE(OP_LOADI8, NN) {
       SET_FIXNUM_VALUE(regs[a], b);
       NEXT;
     }
 
-    CASE(OP_LOADINEG, BB) {
+    CASE(OP_LOADINEG, NN) {
       SET_FIXNUM_VALUE(regs[a], -b);
-      NEXT;
-    }
-
-    CASE(OP_LOADI__1,B) goto L_LOADI;
-    CASE(OP_LOADI_0,B) goto L_LOADI;
-    CASE(OP_LOADI_1,B) goto L_LOADI;
-    CASE(OP_LOADI_2,B) goto L_LOADI;
-    CASE(OP_LOADI_3,B) goto L_LOADI;
-    CASE(OP_LOADI_4,B) goto L_LOADI;
-    CASE(OP_LOADI_5,B) goto L_LOADI;
-    CASE(OP_LOADI_6,B) goto L_LOADI;
-    CASE(OP_LOADI_7, B) {
-    L_LOADI:
-      SET_FIXNUM_VALUE(regs[a], (mrb_int)insn - (mrb_int)OP_LOADI_0);
       NEXT;
     }
 
@@ -1826,11 +1812,6 @@ RETRY_TRY_BLOCK:
 
     CASE(OP_LOADNIL, B) {
       SET_NIL_VALUE(regs[a]);
-      NEXT;
-    }
-
-    CASE(OP_LOADSELF, B) {
-      regs[a] = regs[0];
       NEXT;
     }
 
@@ -1957,36 +1938,6 @@ RETRY_TRY_BLOCK:
         }
       }
     getidx_fallback:
-      mid = MRB_OPSYM(aref);
-      goto L_SEND_SYM;
-    }
-
-    CASE(OP_GETIDX0, BB) {
-      mrb_value recv = regs[b];
-      enum mrb_vtype tt = mrb_type(recv);
-
-      if (mrb_likely(tt == MRB_TT_ARRAY)) {
-        struct RArray *ary = mrb_ary_ptr(recv);
-        if (mrb_unlikely(ary->c != mrb->array_class)) goto getidx0_fallback;
-#ifndef MRB_ARY_NO_EMBED
-        if (ARY_EMBED_P(ary)) {
-          regs[a] = ARY_EMBED_LEN(ary) > 0 ? ary->as.ary[0] : mrb_nil_value();
-        }
-        else
-#endif
-        {
-          regs[a] = ary->as.heap.len > 0 ? ary->as.heap.ptr[0] : mrb_nil_value();
-        }
-        NEXT;
-      }
-      else if (tt == MRB_TT_HASH) {
-        if (mrb_obj_ptr(recv)->c != mrb->hash_class) goto getidx0_fallback;
-        regs[a] = mrb_hash_get(mrb, recv, mrb_fixnum_value(0));
-        NEXT;
-      }
-    getidx0_fallback:
-      regs[a] = recv;
-      SET_FIXNUM_VALUE(regs[a+1], 0);
       mid = MRB_OPSYM(aref);
       goto L_SEND_SYM;
     }
@@ -2777,22 +2728,6 @@ RETRY_TRY_BLOCK:
       RAISE_LIT(mrb, E_LOCALJUMP_ERROR, "unexpected return");
       /* not reached */
     }
-    CASE(OP_RETSELF, Z) {
-      a = 0;
-      goto NORMAL_RETURN;
-    }
-    CASE(OP_RETNIL, Z) {
-      a = 0;
-      goto L_RETURN_NIL;
-    }
-    CASE(OP_RETTRUE, Z) {
-      a = 0;
-      goto L_RETURN_TRUE;
-    }
-    CASE(OP_RETFALSE, Z) {
-      a = 0;
-      goto L_RETURN_FALSE;
-    }
     CASE(OP_RETURN, B) {
       mrb_int acc;
       mrb_value v;
@@ -2800,16 +2735,6 @@ RETRY_TRY_BLOCK:
 
     NORMAL_RETURN:
       v = regs[a];
-      goto L_RETURN;
-    L_RETURN_NIL:
-      v = mrb_nil_value();
-      goto L_RETURN;
-    L_RETURN_TRUE:
-      v = mrb_true_value();
-      goto L_RETURN;
-    L_RETURN_FALSE:
-      v = mrb_false_value();
-    L_RETURN:
       mrb_gc_protect(mrb, v);
       return_ci = ci;
       CHECKPOINT_RESTORE(RBREAK_TAG_BREAK) {

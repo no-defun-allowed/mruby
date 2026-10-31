@@ -15,23 +15,13 @@ operation code    operands      semantics
 ------------------------------------------------------------------------*/
 OPCODE(NOP,        Z)        /* no operation */
 OPCODE(MOVE,       NN)       /* R[a] = R[b] */
-OPCODE(LOADL,      BB)       /* R[a] = Pool[b] */
-OPCODE(LOADI8,     BB)       /* R[a] = mrb_int(b) */
-OPCODE(LOADINEG,   BB)       /* R[a] = mrb_int(-b) */
-OPCODE(LOADI__1,   B)        /* R[a] = mrb_int(-1) */
-OPCODE(LOADI_0,    B)        /* R[a] = mrb_int(0) */
-OPCODE(LOADI_1,    B)        /* R[a] = mrb_int(1) */
-OPCODE(LOADI_2,    B)        /* R[a] = mrb_int(2) */
-OPCODE(LOADI_3,    B)        /* R[a] = mrb_int(3) */
-OPCODE(LOADI_4,    B)        /* R[a] = mrb_int(4) */
-OPCODE(LOADI_5,    B)        /* R[a] = mrb_int(5) */
-OPCODE(LOADI_6,    B)        /* R[a] = mrb_int(6) */
-OPCODE(LOADI_7,    B)        /* R[a] = mrb_int(7) */
+OPCODE(LOADL,      NN)       /* R[a] = Pool[b] */
+OPCODE(LOADI8,     NN)       /* R[a] = mrb_int(b) */
+OPCODE(LOADINEG,   NN)       /* R[a] = mrb_int(-b) */
 OPCODE(LOADI16,    BS)       /* R[a] = mrb_int(b) */
 OPCODE(LOADI32,    BSS)      /* R[a] = mrb_int((b<<16)+c) */
 OPCODE(LOADSYM,    NN)       /* R[a] = Syms[b] */
 OPCODE(LOADNIL,    B)        /* R[a] = nil */
-OPCODE(LOADSELF,   B)        /* R[a] = self */
 OPCODE(LOADTRUE,   B)        /* R[a] = true */
 OPCODE(LOADFALSE,  B)        /* R[a] = false */
 OPCODE(GETGV,      NN)       /* R[a] = getglobal(Syms[b]) */
@@ -49,7 +39,6 @@ OPCODE(SETMCNST,   NN)       /* R[a+1]::Syms[b] = R[a] */
 OPCODE(GETUPVAR,   BBB)      /* R[a] = uvget(b,c) */
 OPCODE(SETUPVAR,   BBB)      /* uvset(b,c,R[a]) */
 OPCODE(GETIDX,     B)        /* R[a] = R[a][R[a+1]] */
-OPCODE(GETIDX0,    BB)       /* R[a] = R[b][0]; a+1 for method call */
 OPCODE(SETIDX,     B)        /* R[a][R[a+1]] = R[a+2] */
 OPCODE(JMP,        S)        /* pc+=a */
 OPCODE(JMPIF,      BS)       /* if R[a] pc+=b */
@@ -76,10 +65,6 @@ OPCODE(KEYEND,     Z)        /* raise unless kdict.empty? */
 OPCODE(KARG,       NN)       /* R[a] = kdict[Syms[b]]; kdict.delete(Syms[b]) */
 OPCODE(RETURN,     B)        /* return R[a] (normal) */
 OPCODE(RETURN_BLK, B)        /* return R[a] (in-block return) */
-OPCODE(RETSELF,    Z)        /* return self */
-OPCODE(RETNIL,     Z)        /* return nil */
-OPCODE(RETTRUE,    Z)        /* return true */
-OPCODE(RETFALSE,   Z)        /* return false */
 OPCODE(BREAK,      B)        /* break R[a] */
 OPCODE(BLKPUSH,    BS)       /* R[a] = block (16=m5:r1:m5:d1:lv4) */
 OPCODE(ADD,        B)        /* R[a] = R[a]+R[a+1] */
@@ -132,7 +117,6 @@ OPCODE(EXT1,       Z)        /* make 1st operand (a) 16bit */
 OPCODE(EXT2,       Z)        /* make 2nd operand (b) 16bit */
 OPCODE(EXT3,       Z)        /* make 1st and 2nd operands 16bit */
 OPCODE(STOP,       Z)        /* stop VM */
-/* Compressed instruction extension */
 OPCODE(ENTER0,     Z)
 OPCODE(ENTER1,     Z)
 OPCODE(ENTER2,     Z)
