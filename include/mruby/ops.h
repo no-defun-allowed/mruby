@@ -80,7 +80,7 @@ OPCODE(LT,         B)        /* R[a] = R[a]<R[a+1] */
 OPCODE(LE,         B)        /* R[a] = R[a]<=R[a+1] */
 OPCODE(GT,         B)        /* R[a] = R[a]>R[a+1] */
 OPCODE(GE,         B)        /* R[a] = R[a]>=R[a+1] */
-OPCODE(ARRAY,      BB)       /* R[a] = ary_new(R[a],R[a+1]..R[a+b]) */
+OPCODE(ARRAY,      NN)       /* R[a] = ary_new(R[a],R[a+1]..R[a+b]) */
 OPCODE(ARRAY2,     BBB)      /* R[a] = ary_new(R[b],R[b+1]..R[b+c]) */
 OPCODE(ARYCAT,     B)        /* ary_cat(R[a],R[a+1]) */
 OPCODE(ARYPUSH,    BB)       /* ary_push(R[a],R[a+1]..R[a+b]) */

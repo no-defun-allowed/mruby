@@ -3149,7 +3149,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_ARRAY, BB) {
+    CASE(OP_ARRAY, NN) {
       regs[a] = ary_new_from_regs(mrb, b, a);
       mrb_gc_arena_restore(mrb, ai);
       NEXT;

@@ -978,7 +978,7 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       if (data.a != src || data.a < s->nlocals || data.a < dst) break;
       rewind_pc(s);
       if (data.b == 0 || dst == data.a)
-        genop_2(s, OP_ARRAY, dst, 0);
+        genop_NN(s, OP_ARRAY, dst, 0);
       else
         genop_3(s, OP_ARRAY2, dst, data.a, data.b);
       return;
@@ -2813,7 +2813,7 @@ gen_values(codegen_scope *s, node *t, int val, int limit)
           genop_1(s, OP_LOADNIL, cursp());
         }
         else {
-          genop_2(s, OP_ARRAY, cursp(), n);
+          genop_NN(s, OP_ARRAY, cursp(), n);
         }
         push();
         first = 0;
@@ -2847,7 +2847,7 @@ gen_values(codegen_scope *s, node *t, int val, int limit)
   }
   else if (n > limit) {
     pop_n(n);
-    genop_2(s, OP_ARRAY, cursp(), n);
+    genop_NN(s, OP_ARRAY, cursp(), n);
     return -1;
   }
   return n;
@@ -3187,7 +3187,7 @@ gen_literal_array(codegen_scope *s, node *tree, mrb_bool sym, int val)
             if (array_size > 0) {
               pop_n(array_size);
               if (first) {
-                genop_2(s, OP_ARRAY, cursp(), array_size);
+                genop_NN(s, OP_ARRAY, cursp(), array_size);
                 push();
                 first = 0;
               }
@@ -3239,10 +3239,10 @@ gen_literal_array(codegen_scope *s, node *tree, mrb_bool sym, int val)
     }
     else if (array_size > 0) {
       pop_n(array_size);
-      genop_2(s, OP_ARRAY, cursp(), array_size);
+      genop_NN(s, OP_ARRAY, cursp(), array_size);
     }
     else {
-      genop_2(s, OP_ARRAY, cursp(), 0);
+      genop_NN(s, OP_ARRAY, cursp(), 0);
     }
     push();
   }
@@ -3732,7 +3732,7 @@ codegen_call_assign(codegen_scope *s, node *varnode, node *rhs, int sp, int val)
       }
       if (n > 13) {  /* leave room for rhs */
         pop_n(n);
-        genop_2(s, OP_ARRAY, cursp(), n);
+        genop_NN(s, OP_ARRAY, cursp(), n);
         push();
         n = 15;
         noop = 1;
@@ -3744,7 +3744,7 @@ codegen_call_assign(codegen_scope *s, node *varnode, node *rhs, int sp, int val)
       node *kwargs = callargs->keyword_args;
       if (n == 13 || n == 14) {
         pop_n(n);
-        genop_2(s, OP_ARRAY, cursp(), n);
+        genop_NN(s, OP_ARRAY, cursp(), n);
         push();
         n = 15;
       }
@@ -3824,7 +3824,7 @@ codegen_array(codegen_scope *s, node *varnode, int val)
   if (!val) return;
 
   if (!elements) {
-    genop_2(s, OP_ARRAY, cursp(), 0);
+    genop_NN(s, OP_ARRAY, cursp(), 0);
     push();
     return;
   }
@@ -3861,7 +3861,7 @@ codegen_array(codegen_scope *s, node *varnode, int val)
       if (regular_elements > 0) {
         pop_n(regular_elements);
         if (first) {
-          genop_2(s, OP_ARRAY, cursp(), regular_elements);
+          genop_NN(s, OP_ARRAY, cursp(), regular_elements);
           push();
           first = 0;
         }
@@ -3875,7 +3875,7 @@ codegen_array(codegen_scope *s, node *varnode, int val)
       else if (first && is_splat) {
         /* First element is splat - create empty array */
         genop_1(s, OP_LOADNIL, cursp());
-        genop_2(s, OP_ARRAY, cursp(), 0);
+        genop_NN(s, OP_ARRAY, cursp(), 0);
         push();
         first = 0;
       }
@@ -3908,7 +3908,7 @@ codegen_array(codegen_scope *s, node *varnode, int val)
   else {
     /* Simple case: no splats, just create array */
     pop_n(regular_elements);
-    genop_2(s, OP_ARRAY, cursp(), regular_elements);
+    genop_NN(s, OP_ARRAY, cursp(), regular_elements);
     push();
   }
 }
@@ -4473,7 +4473,7 @@ gen_pat_keys_ary(codegen_scope *s, node *pairs, int num_keys)
     gen_pat_key(s, pair->car->car);
     push();
   }
-  genop_2(s, OP_ARRAY, cursp() - num_keys, num_keys);
+  genop_NN(s, OP_ARRAY, cursp() - num_keys, num_keys);
   for (i = 1; i < num_keys; i++) pop();
 }
 
@@ -4481,6 +4481,7 @@ static void
 codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos, int known_array_len)
 {
 #define SEND1_OPSYM(name) genop_NN(s, OP_SEND1, cursp(), sym_idx(s, MRB_OPSYM(name)))
+#define OP1(op) genop_1(s, op, cursp());
 #define SEND0_SYM(reg, name) genop_NN(s, OP_SEND0, reg, sym_idx(s, MRB_SYM(name)))
   uint32_t tmp;
 
@@ -4675,7 +4676,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
             /* arr at cursp-2, range at cursp-1 */
             pop();  /* cursp now at range position */
             pop();  /* cursp now at arr position */
-            SEND1_OPSYM(aref);
+            OP1(OP_GETIDX);
             if (var_idx > 0) {
               gen_move(s, var_idx, cursp(), 1);
             }
@@ -4744,7 +4745,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
           push();
           gen_int(s, cursp(), i);
           push(); push(); pop(); pop(); pop();
-          SEND1_OPSYM(aref);
+          OP1(OP_GETIDX);
           push();  /* Preserve element result for codegen_pattern */
           /* Match element pattern */
           codegen_pattern(s, elem->car, cursp() - 1, fail_pos, -1);
@@ -4772,7 +4773,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
             /* arr at cursp-2, range at cursp-1 */
             pop();  /* cursp now at range position */
             pop();  /* cursp now at arr position */
-            SEND1_OPSYM(aref);
+            OP1(OP_GETIDX);
             if (var_idx > 0) {
               gen_move(s, var_idx, cursp(), 1);
             }
@@ -4787,7 +4788,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
           push();
           gen_int(s, cursp(), i);
           push(); push(); pop(); pop(); pop();
-          SEND1_OPSYM(aref);
+          OP1(OP_GETIDX);
           push();  /* Preserve element result for codegen_pattern */
           /* Match element pattern */
           codegen_pattern(s, elem->car, cursp() - 1, fail_pos, -1);
@@ -4831,7 +4832,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
       SEND0_SYM(cursp() - 1, size);
       gen_int(s, cursp(), elems_len);
       push(); push(); pop(); pop(); pop();
-      SEND1_OPSYM(ge);
+      OP1(OP_GE);
       tmp = genjmp2(s, OP_JMPNOT, cursp(), *fail_pos, 1);
       *fail_pos = tmp;
 
@@ -4851,12 +4852,12 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
       SEND0_SYM(cursp() - 1, size);
       gen_int(s, cursp(), elems_len);
       push(); push(); pop(); pop(); pop();
-      SEND1_OPSYM(sub);
+      OP1(OP_SUB);
       /* Now cursp() has (size - elems_len), compare: idx <= (size - elems_len) */
       gen_move(s, cursp() + 1, idx_reg, 0);
       push();
       push(); push(); pop(); pop(); pop();
-      SEND1_OPSYM(ge);
+      OP1(OP_GE);
       tmp = genjmp2(s, OP_JMPNOT, cursp(), *fail_pos, 1);
       *fail_pos = tmp;
 
@@ -4874,10 +4875,10 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
           push();
           gen_int(s, cursp(), offset);
           push(); push(); pop(); pop(); pop();
-          SEND1_OPSYM(add);
+          OP1(OP_ADD);
         }
         push(); push(); pop(); pop(); pop();
-        SEND1_OPSYM(aref);
+        OP1(OP_GETIDX);
         push();  /* Preserve element result for codegen_pattern */
         /* Match element pattern - on fail, try next index */
         codegen_pattern(s, elem->car, cursp() - 1, &match_fail, -1);
@@ -4901,7 +4902,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
           /* arr at cursp-2, range at cursp-1 */
           pop();  /* cursp now at range position */
           pop();  /* cursp now at arr position */
-          SEND1_OPSYM(aref);
+          OP1(OP_GETIDX);
           if (var_idx > 0) {
             gen_move(s, var_idx, cursp(), 1);
           }
@@ -4921,7 +4922,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
           push();
           gen_int(s, cursp(), elems_len);    /* elems_len at cursp */
           push(); push(); pop(); pop(); pop();
-          SEND1_OPSYM(add);
+          OP1(OP_ADD);
           /* start index (idx+elems_len) now at cursp */
           push();
           gen_int(s, cursp(), -1);           /* end=-1 at cursp */
@@ -4930,7 +4931,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
           /* arr at cursp-2, range at cursp-1 */
           pop();  /* cursp now at range position */
           pop();  /* cursp now at arr position */
-          SEND1_OPSYM(aref);
+          OP1(OP_GETIDX);
           if (var_idx > 0) {
             gen_move(s, var_idx, cursp(), 1);
           }
@@ -4946,7 +4947,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
       push();
       gen_int(s, cursp(), 1);
       push(); push(); pop(); pop(); pop();
-      SEND1_OPSYM(add);
+      OP1(OP_ADD);
       gen_move(s, idx_reg, cursp(), 0);
       genjmp(s, OP_JMP, loop_start);
 
@@ -5005,7 +5006,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
           push();
           gen_int(s, cursp(), i);
           push(); push(); pop(); pop(); pop();
-          SEND1_OPSYM(aref);
+          OP1(OP_GETIDX);
           push();
 
           codegen_pattern(s, pat, cursp() - 1, fail_pos, -1);
@@ -5058,6 +5059,7 @@ codegen_pattern(codegen_scope *s, node *pattern, int target, uint32_t *fail_pos,
     break;
   }
 #undef SEND1_OPSYM
+#undef OP1
 #undef SEND0_SYM
 }
 
@@ -5327,7 +5329,7 @@ codegen_masgn(codegen_scope *s, node *varnode, node *rhs, int sp, int val)
               rn = len - post - n;
             }
             if (cursp() == rhs_reg+n) {
-              genop_2(s, OP_ARRAY, cursp(), rn);
+              genop_NN(s, OP_ARRAY, cursp(), rn);
             }
             else {
               genop_3(s, OP_ARRAY2, cursp(), rhs_reg+n, rn);
