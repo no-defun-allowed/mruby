@@ -4222,12 +4222,12 @@ inspect_main(mrb_state *mrb, mrb_value mod)
 static const mrb_code new_iseq[] = {
   OP_ENTER, 0x0, 0x10, 0x3,  // 000 OP_ENTER     0:0:1:0:0:1:1
   OP_SSEND, 4, 0, 0,         // 004 OP_SSEND     R4  :allocate  n=0
-  OP_MOVE, 0, 4,             // 008 OP_MOVE      R0  R4
-  OP_MOVE, 4, 3,             // 011 OP_MOVE      R4  R3         ; &
-  OP_MOVE, 3, 2,             // 014 OP_MOVE      R3  R2         ; **
-  OP_MOVE, 2, 1,             // 017 OP_MOVE      R2  R1         ; *
+  OP_MOVE, 0x04,             // 008 OP_MOVE      R0  R4
+  OP_MOVE, 0x43,             // 011 OP_MOVE      R4  R3         ; &
+  OP_MOVE, 0x32,             // 014 OP_MOVE      R3  R2         ; **
+  OP_MOVE, 0x21,             // 017 OP_MOVE      R2  R1         ; *
   OP_SSENDB, 1, 1, 255,      // 020 OP_SSENDB    R1  :initialize n=*|nk=*
-  OP_RETURN, 0               // 024 OP_RETURN    R0
+  OP_RETURN0               // 024 OP_RETURN    R0
 };
 
 MRB_PRESYM_DEFINE_VAR_AND_INITER(new_syms, 2, MRB_SYM(allocate), MRB_SYM(initialize))

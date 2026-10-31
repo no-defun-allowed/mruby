@@ -22,17 +22,17 @@ static const mrb_code catch_iseq[] = {
   OP_JMP,      0x00, 0x06,           // 004 JMP           013
 
   // copy for block parameter "tag" when method argument are given
-  OP_MOVE,     0x03, 0x01,           // 007 MOVE          R3      R1
+  OP_MOVE,     0x31,           // 007 MOVE          R3      R1
   OP_JMP,      0x00, 0x0a,           // 010 JMP           023
 
   // create a tag for default parameter
-  OP_GETCONST, 0x03, 0x00,           // 013 GETCONST      R3      Object
+  OP_GETCONST, 0x30,           // 013 GETCONST      R3      Object
   OP_SEND,     0x03, 0x01, 0x00,     // 016 SEND          R3      :new    n=0
-  OP_MOVE,     0x01, 0x03,           // 020 MOVE          R1      R3
+  OP_MOVE,     0x13,           // 020 MOVE          R1      R3
 
   // to save on the stack, block variables are used as is
   OP_SEND,     0x02, 0x02, 0x01,     // 023 SEND          R2      :call   n=1
-  OP_RETURN,   0x02,                 // 027 RETURN        R2
+  OP_RETURN2,                 // 027 RETURN        R2
 };
 
 /* Instruction representation for catch method bytecode */

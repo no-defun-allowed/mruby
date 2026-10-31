@@ -240,25 +240,6 @@ codegen_palloc(codegen_scope *s, size_t len)
 }
 
 /*
- * Checks if instruction operands `a` or `b` exceed 8 bits (0xff).
- *
- * If the parser option `no_ext_ops` is set (disallowing OP_EXT1/2/3),
- * and either operand is larger than 0xff, this function calls `codegen_error`
- * to report that an extended opcode would be required.
- *
- * @param s The current code generation scope.
- * @param a The first operand.
- * @param b The second operand.
- */
-static void
-check_no_ext_ops(codegen_scope *s, uint16_t a, uint16_t b)
-{
-  if (s->parser->no_ext_ops && (a | b) > 0xff) {
-    codegen_error(s, "need OP_EXTs instruction (currently OP_EXTs are prohibited)");
-  }
-}
-
-/*
  * Creates a new label by returning the current program counter (pc)
  * and updating `s->lastlabel` to this value.
  *
@@ -375,15 +356,6 @@ genop_0(codegen_scope *s, mrb_code i)
   gen_B(s, i);
 }
 
-static void
-genop_NN(codegen_scope *s, mrb_code i, uint8_t a, uint8_t b)
-{
-  s->lastpc = s->pc;
-  check_no_ext_ops(s, a, 0);
-  gen_B(s, i);
-  gen_B(s, a << 4 | b);
-}
-
 /*
  * Generates an opcode `i` with a single 16-bit operand `a`.
  * If `a` is larger than 0xFF (255), it prepends `OP_EXT1` and emits `a` as a short.
@@ -398,7 +370,6 @@ static void
 genop_1(codegen_scope *s, mrb_code i, uint16_t a)
 {
   s->lastpc = s->pc;
-  check_no_ext_ops(s, a, 0);
   if (a > 0xff) {
     gen_B(s, OP_EXT1);
     gen_B(s, i);
@@ -425,7 +396,6 @@ static void
 genop_2(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
 {
   s->lastpc = s->pc;
-  check_no_ext_ops(s, a, b);
   if (a > 0xff && b > 0xff) {
     gen_B(s, OP_EXT3);
     gen_B(s, i);
@@ -448,6 +418,34 @@ genop_2(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
     gen_B(s, i);
     gen_B(s, (uint8_t)a);
     gen_B(s, (uint8_t)b);
+  }
+}
+
+static void
+genop_NN(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
+{
+  s->lastpc = s->pc;
+  if (a > 0xf && b > 0xf) {
+    gen_B(s, OP_EXT3);
+    gen_B(s, i);
+    gen_S(s, a);
+    gen_S(s, b);
+  }
+  else if (b > 0xf) {
+    gen_B(s, OP_EXT2);
+    gen_B(s, i);
+    gen_B(s, (uint8_t)a);
+    gen_S(s, b);
+  }
+  else if (a > 0xf) {
+    gen_B(s, OP_EXT1);
+    gen_B(s, i);
+    gen_S(s, a);
+    gen_B(s, (uint8_t)b);
+  }
+  else {
+    gen_B(s, i);
+    gen_B(s, (uint8_t)(a << 4 | b));
   }
 }
 
@@ -611,22 +609,24 @@ mrb_decode_insn(const mrb_code *pc)
 #define Z 1
 #define S 3
 #define W 4
-#define NN 2
 #define OPCODE(_,x) x,
 /* instruction sizes */
 static uint8_t mrb_insn_size[] = {
 #define B 2
+#define NN 2
 #define BB 3
 #define BBB 4
 #define BS 4
 #define BSS 6
 #include <mruby/ops.h>
 #undef B
+#undef NN
 #undef BB
 #undef BBB
 #undef BS
 #undef BSS
 };
+#define NN BB
 /* EXT1 instruction sizes */
 static uint8_t mrb_insn_size1[] = {
 #define B 3
@@ -665,6 +665,7 @@ static uint8_t mrb_insn_size3[] = {
 #undef BBB
 #undef BS
 #undef BSS
+#undef NN
 #undef OPCODE
 
 /*
@@ -844,7 +845,6 @@ genjmp2(codegen_scope *s, mrb_code i, uint16_t a, uint32_t pc, int val)
 
     switch (data.insn) {
     case OP_MOVE:
-    case OP_C_MOVE:
       if (data.a == a && data.a > s->nlocals) {
         rewind_pc(s);
         a = data.b;
@@ -879,7 +879,6 @@ genjmp2(codegen_scope *s, mrb_code i, uint16_t a, uint32_t pc, int val)
   }
 
   if (a > 0xff) {
-    check_no_ext_ops(s, a, 0);
     gen_B(s, OP_EXT1);
     genop_0(s, i);
     gen_S(s, a);
@@ -897,33 +896,6 @@ genjmp2(codegen_scope *s, mrb_code i, uint16_t a, uint32_t pc, int val)
 
 static mrb_bool get_int_operand(codegen_scope *s, struct mrb_insn_data *data, mrb_int *ns);
 static void gen_int(codegen_scope *s, uint16_t dst, mrb_int i);
-
-static mrb_bool is_move(struct mrb_insn_data d) {
-  return d.insn == OP_MOVE || d.insn == OP_C_MOVE;
-}
-
-static void gen_NN_op(codegen_scope *s, mrb_code compressed, mrb_code base, uint16_t a, uint16_t b) {
-  if (a < 16 && b < 16)
-    genop_NN(s, compressed, a, b);
-  else
-    genop_2(s, base, a, b);
-}
-
-static void gen_move_op(codegen_scope *s, uint16_t dst, uint16_t src) {
-  gen_NN_op(s, OP_C_MOVE, OP_MOVE, dst, src);
-}
-
-static void gen_loadsym_op(codegen_scope *s, uint16_t dst, uint16_t src) {
-  gen_NN_op(s, OP_C_LOADSYM, OP_LOADSYM, dst, src);
-}
-
-static mrb_bool is_string(struct mrb_insn_data d) {
-  return d.insn == OP_STRING || d.insn == OP_C_STRING;
-}
-
-static void gen_string_op(codegen_scope *s, uint16_t dst, uint16_t src) {
-  gen_NN_op(s, OP_C_STRING, OP_STRING, dst, src);
-}
 
 /*
  * Generates an OP_MOVE instruction to copy the value from register `src` to register `dst`.
@@ -957,7 +929,6 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
 
     switch (data.insn) {
     case OP_MOVE:
-    case OP_C_MOVE:
       if (dst == src) return;   /* remove useless MOVE */
       if (data.a == src) {
         if (data.b == dst)      /* skip swapping MOVE */
@@ -987,13 +958,17 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       if (data.b != 0) break;
       /* fall through */
     case OP_LOADI8: case OP_LOADINEG:
-    case OP_LOADL: case OP_LOADSYM:
+    case OP_LOADL:
     case OP_GETGV: case OP_GETSV: case OP_GETIV: case OP_GETCV:
-    case OP_GETCONST: case OP_STRING:
-    case OP_LAMBDA: case OP_BLOCK: case OP_METHOD: case OP_BLKPUSH:
+    case OP_LAMBDA: case OP_METHOD: case OP_BLKPUSH:
       if (data.a != src || data.a < s->nlocals) break;
       rewind_pc(s);
       genop_2(s, data.insn, dst, data.b);
+      return;
+    case OP_GETCONST: case OP_LOADSYM: case OP_STRING: case OP_BLOCK:
+      if (data.a != src || data.a < s->nlocals) break;
+      rewind_pc(s);
+      genop_NN(s, data.insn, dst, data.b);
       return;
     case OP_LOADI16:
       if (data.a != src || data.a < s->nlocals) break;
@@ -1031,7 +1006,7 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       if (addr_pc(s, data.addr) == s->lastlabel || data.a != src || data.a < s->nlocals) break;
       else {
         struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-        if (!is_move(data0) || data0.a != data.a || data0.b != dst) break;
+        if (data0.insn != OP_MOVE || data0.a != data.a || data0.b != dst) break;
         if (addr_pc(s, data0.addr) != s->lastlabel) {
           /* constant folding */
           struct mrb_insn_data data1 = mrb_decode_insn(mrb_prev_pc(s, data0.addr));
@@ -1056,7 +1031,7 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       break;
     }
   }
-  gen_move_op(s, dst, src);
+  genop_NN(s, OP_MOVE, dst, src);
 }
 
 /*
@@ -1143,7 +1118,7 @@ gen_setupvar(codegen_scope *s, uint16_t dst, mrb_sym id)
 
   if (!no_peephole(s)) {
     struct mrb_insn_data data = mrb_last_insn(s);
-    if (is_move(data) && data.a == dst) {
+    if (data.insn == OP_MOVE && data.a == dst) {
       dst = data.b;
       rewind_pc(s);
     }
@@ -1178,7 +1153,7 @@ gen_return(codegen_scope *s, uint8_t op, uint16_t src)
   else {
     struct mrb_insn_data data = mrb_last_insn(s);
 
-    if (is_move(data) && src == data.a) {
+    if (data.insn == OP_MOVE && src == data.a) {
       rewind_pc(s);
       genop_1(s, op, data.b);
     }
@@ -1391,7 +1366,7 @@ merge_op_string(codegen_scope *s, uint16_t dst, uint16_t b1, uint16_t b2, const 
   mrb_assert(pc < s->iseq + s->icapa);
   while (i<pc) {
     struct mrb_insn_data data = mrb_decode_insn(i);
-    if (is_string(data)) {
+    if (data.insn == OP_STRING) {
       if (data.b == b1) used |= 1;
       if (data.b == b2) used |= 2;
     }
@@ -1443,7 +1418,7 @@ merge_op_string(codegen_scope *s, uint16_t dst, uint16_t b1, uint16_t b2, const 
     }
   }
   s->pc = addr_pc(s, pc);
-  gen_string_op(s, dst, off);
+  genop_NN(s, OP_STRING, dst, off);
 }
 
 /*
@@ -1485,9 +1460,9 @@ gen_addsub(codegen_scope *s, uint8_t op, uint16_t dst)
 
     if (!get_int_operand(s, &data, &n)) {
       /* not integer immediate */
-      if (op == OP_ADD && is_string(data)) {
+      if (op == OP_ADD && data.insn == OP_STRING) {
         struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-        if (is_string(data0)) {
+        if (data0.insn == OP_STRING) {
           merge_op_string(s, dst, data0.b, data.b, data0.addr);
           return;
         }
@@ -1613,7 +1588,7 @@ gen_binop(codegen_scope *s, mrb_sym op, uint16_t dst)
     struct mrb_insn_data data = mrb_last_insn(s);
     if (data.insn == OP_LOADI_0 && data.a == (uint32_t)dst+1 && addr_pc(s, data.addr) != s->lastlabel) {
       struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-      if (is_move(data0) && data0.a == dst && data0.b != dst) {
+      if (data0.insn == OP_MOVE && data0.a == dst && data0.b != dst) {
         s->pc = addr_pc(s, data0.addr);
         genop_2(s, OP_GETIDX0, dst, data0.b);
         return TRUE;
@@ -2164,7 +2139,7 @@ gen_setxv(codegen_scope *s, uint8_t op, uint16_t dst, mrb_sym sym, int val)
   int idx = sym_idx(s, sym);
   if (!val && !no_peephole(s)) {
     struct mrb_insn_data data = mrb_last_insn(s);
-    if (is_move(data) && data.a == dst) {
+    if (data.insn == OP_MOVE && data.a == dst) {
       dst = data.b;
       rewind_pc(s);
     }
@@ -2557,11 +2532,11 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
           mrb_sym kw_sym = node_to_sym(kw->car);
 
           /* Load symbol (key) */
-          gen_loadsym_op(s, cursp(), sym_idx(s, kw_sym));
+          genop_NN(s, OP_LOADSYM, cursp(), sym_idx(s, kw_sym));
           push();
 
           /* Load keyword local variable value */
-          gen_move_op(s, cursp(), lv_idx(s, kw_sym));
+          genop_NN(s, OP_MOVE, cursp(), lv_idx(s, kw_sym));
           push();
 
           num_pairs++;
@@ -2571,12 +2546,12 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
         /* Create hash at current stack position, then move to keyword dict position */
         if (num_pairs > 0) {
           genop_2(s, OP_HASH, sp_save, num_pairs);
-          gen_move_op(s, kw_dict_pos, sp_save);
+          genop_NN(s, OP_MOVE, kw_dict_pos, sp_save);
         }
         else {
           /* No keyword args, create empty hash */
           genop_2(s, OP_HASH, sp_save, 0);
-          gen_move_op(s, kw_dict_pos, sp_save);
+          genop_NN(s, OP_MOVE, kw_dict_pos, sp_save);
         }
 
         /* Restore stack pointer */
@@ -2591,7 +2566,7 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
       if (bparam) { /* If it's a named block parameter. */
         int idx = lv_idx(s, bparam);
         /* Move the block from its argument slot to the local variable. */
-        gen_move_op(s, idx, pos+1);
+        genop_NN(s, OP_MOVE, idx, pos+1);
       }
     }
 
@@ -3205,7 +3180,7 @@ gen_intern(codegen_scope *s)
   if (!no_peephole(s)) {
     struct mrb_insn_data data = mrb_last_insn(s);
 
-    if (is_string(data) && data.a == cursp()) {
+    if (data.insn == OP_STRING && data.a == cursp()) {
       rewind_pc(s);
       genop_2(s, OP_SYMBOL, data.a, data.b);
       push();
@@ -3566,7 +3541,7 @@ gen_string(codegen_scope *s, node *list, int val)
         const char *str = (char*)elem->cdr;
         if (!str) {str = ""; len = 0;}
         int off = new_lit_str(s, str, len);
-        gen_string_op(s, cursp(), off);
+        genop_NN(s, OP_STRING, cursp(), off);
         push();
       }
       else {
@@ -3720,20 +3695,20 @@ codegen_call(codegen_scope *s, node *varnode, int val)
   }
   else if (noself) {
     if (!blk && n == 0 && nk == 0) {
-      gen_NN_op(s, OP_C_SSEND0, OP_SSEND0, cursp(), sym_idx(s, sym));
+      genop_NN(s, OP_SSEND0, cursp(), sym_idx(s, sym));
     }
     else if (!blk && n == 1 && nk == 0) {
-      gen_NN_op(s, OP_C_SSEND1, OP_SSEND1, cursp(), sym_idx(s, sym));
+      genop_NN(s, OP_SSEND1, cursp(), sym_idx(s, sym));
     }
     else {
       genop_3(s, blk ? OP_SSENDB : OP_SSEND, cursp(), sym_idx(s, sym), n|(nk<<4));
     }
   }
   else if (!blk && n == 0 && nk == 0) {
-    gen_NN_op(s, OP_C_SEND0, OP_SEND0, cursp(), sym_idx(s, sym));
+    genop_NN(s, OP_SEND0, cursp(), sym_idx(s, sym));
   }
   else if (!blk && n == 1 && nk == 0) {
-    gen_NN_op(s, OP_C_SEND1, OP_SEND1, cursp(), sym_idx(s, sym));
+    genop_NN(s, OP_SEND1, cursp(), sym_idx(s, sym));
   }
   else {
     genop_3(s, blk ? OP_SENDB : OP_SEND, cursp(), sym_idx(s, sym), n|(nk<<4));
@@ -4303,7 +4278,7 @@ codegen_for(codegen_scope *s, node *varnode, int val)
   loop_pop(s, NOVAL);
   scope_finish(s);
   s = prev;
-  genop_2(s, OP_BLOCK, cursp(), s->irep->rlen-1);
+  genop_NN(s, OP_BLOCK, cursp(), s->irep->rlen-1);
   push();pop(); /* space for a block */
   pop();
   idx = sym_idx(s, MRB_SYM(each));
@@ -4537,7 +4512,7 @@ static void
 gen_pat_key(codegen_scope *s, node *key)
 {
   if (node_type(key) == NODE_SYM) {
-    gen_loadsym_op(s, cursp(), sym_idx(s, sym_node(key)->symbol));
+    genop_NN(s, OP_LOADSYM, cursp(), sym_idx(s, sym_node(key)->symbol));
   }
   else {
     codegen(s, key, VAL);
@@ -5874,7 +5849,7 @@ codegen_const(codegen_scope *s, node *varnode, int val)
   mrb_sym symbol = const_n->symbol;
 
   int i = sym_idx(s, symbol);
-  genop_2(s, OP_GETCONST, cursp(), i);
+  genop_NN(s, OP_GETCONST, cursp(), i);
   if (val) push();
 }
 
@@ -5929,7 +5904,7 @@ codegen_rescue(codegen_scope *s, node *varnode, int val)
             codegen(s, n4->car, VAL);
           }
           else {
-            genop_2(s, OP_GETCONST, cursp(), sym_idx(s, MRB_SYM(StandardError)));
+            genop_NN(s, OP_GETCONST, cursp(), sym_idx(s, MRB_SYM(StandardError)));
             push();
           }
           pop();
@@ -5983,7 +5958,7 @@ codegen_block(codegen_scope *s, node *varnode, int val)
 
   /* Call lambda_body directly with individual parameters */
   int idx = lambda_body(s, n->locals, n->args, n->body, 1);
-  genop_2(s, OP_BLOCK, cursp(), idx);
+  genop_NN(s, OP_BLOCK, cursp(), idx);
   push();
 }
 
@@ -6101,7 +6076,7 @@ codegen_regx(codegen_scope *s, node *varnode, int val)
       /* Add flags (or nil if not present but encoding is) */
       if (n->flags && *n->flags) {
         off = new_lit_cstr(s, n->flags);
-        gen_string_op(s, cursp(), off);
+        genop_NN(s, OP_STRING, cursp(), off);
       }
       else {
         genop_1(s, OP_LOADNIL, cursp());
@@ -6112,7 +6087,7 @@ codegen_regx(codegen_scope *s, node *varnode, int val)
       /* Add encoding if present */
       if (n->encoding && *n->encoding) {
         off = new_lit_cstr(s, n->encoding);
-        gen_string_op(s, cursp(), off);
+        genop_NN(s, OP_STRING, cursp(), off);
         push();
         argc++;
       }
@@ -6623,7 +6598,7 @@ codegen(codegen_scope *s, node *tree, int val)
     {
       int i = sym_idx(s, sym_node(tree)->symbol);
       if (val) {
-        gen_loadsym_op(s, cursp(), i);
+        genop_NN(s, OP_LOADSYM, cursp(), i);
         push();
       }
     }

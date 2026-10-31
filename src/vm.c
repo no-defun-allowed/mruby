@@ -1739,7 +1739,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_MOVE, BB) {
+    CASE(OP_MOVE, NN) {
       regs[a] = regs[b];
       NEXT;
     }
@@ -1819,7 +1819,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_LOADSYM, BB) {
+    CASE(OP_LOADSYM, NN) {
       SET_SYM_VALUE(regs[a], irep->syms[b]);
       NEXT;
     }
@@ -2018,7 +2018,7 @@ RETRY_TRY_BLOCK:
       }
     }
 
-    CASE(OP_GETCONST, BB) {
+    CASE(OP_GETCONST, NN) {
       mrb_value v = mrb_vm_const_get(mrb, irep->syms[b]);
       ci = mrb->c->ci;
       regs[a] = v;
@@ -2232,7 +2232,7 @@ RETRY_TRY_BLOCK:
     }
     goto L_SENDB;
 
-    CASE(OP_SSEND0, BB) {
+    CASE(OP_SSEND0, NN) {
       regs[a] = regs[0];
       c = 0;
     }
@@ -2246,7 +2246,7 @@ RETRY_TRY_BLOCK:
     CASE(OP_SEND, BBB)
     goto L_SENDB;
 
-    CASE(OP_SEND0, BB) {
+    CASE(OP_SEND0, NN) {
       c = 0;
     }
     goto L_SENDB;
@@ -2291,8 +2291,8 @@ RETRY_TRY_BLOCK:
       }
 
       mrb_assert(bidx < irep->nregs);
-      if (insn == OP_SEND || insn == OP_SEND0 || insn == OP_C_SEND0 || insn == OP_SEND1 || insn == OP_C_SEND1 ||
-          insn == OP_SSEND || insn == OP_SSEND0 || insn == OP_C_SSEND0 || insn == OP_SSEND1 || insn == OP_C_SSEND1) {
+      if (insn == OP_SEND || insn == OP_SEND0 || insn == OP_SEND1 ||
+          insn == OP_SSEND || insn == OP_SSEND0 || insn == OP_SSEND1) {
         /* clear block argument */
         SET_NIL_VALUE(regs[new_bidx]);
         SET_NIL_VALUE(blk);
@@ -3346,7 +3346,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_STRING, BB) {
+    CASE(OP_STRING, NN) {
       mrb_int len;
 
       mrb_assert((irep->pool[b].tt&IREP_TT_NFLAG)==0);
@@ -3423,7 +3423,7 @@ RETRY_TRY_BLOCK:
       mrb_gc_arena_restore(mrb, ai);
       NEXT;
     }
-    CASE(OP_BLOCK, BB) {
+    CASE(OP_BLOCK, NN) {
       c = OP_L_BLOCK;
       goto L_MAKE_LAMBDA;
     }
@@ -3673,9 +3673,6 @@ RETRY_TRY_BLOCK:
     CASE(OP_ENTER0, Z) { a = 0; goto L_OP_ENTER_BODY; }
     CASE(OP_ENTER1, Z) { a = 0x40000; goto L_OP_ENTER_BODY; }
     CASE(OP_ENTER2, Z) { a = 0x80000; goto L_OP_ENTER_BODY; }
-    CASE(OP_C_MOVE, NN) { regs[a] = regs[b]; NEXT; }
-    CASE(OP_C_LOADSYM, NN) { goto L_OP_LOADSYM_BODY; }
-    CASE(OP_C_STRING, NN) { goto L_OP_STRING_BODY; }
     CASE(OP_RETURN0, Z) { a = 0; goto NORMAL_RETURN; }
     CASE(OP_RETURN1, Z) { a = 1; goto NORMAL_RETURN; }
     CASE(OP_RETURN2, Z) { a = 2; goto NORMAL_RETURN; }
@@ -3684,12 +3681,8 @@ RETRY_TRY_BLOCK:
     CASE(OP_RETURN5, Z) { a = 5; goto NORMAL_RETURN; }
     CASE(OP_RETURN6, Z) { a = 6; goto NORMAL_RETURN; }
     CASE(OP_RETURN7, Z) { a = 7; goto NORMAL_RETURN; }
-    CASE(OP_C_SEND0, NN) { c = 0; goto L_SENDB; }
-    CASE(OP_C_SSEND0, NN) { regs[a] = regs[0]; c = 0; goto L_SENDB; }
-    CASE(OP_C_SEND1, NN) { c = 1; goto L_SENDB; }
-    CASE(OP_C_SSEND1, NN) { regs[a] = regs[0]; c = 1; goto L_SENDB; }
-    CASE(OP_SEND1, BB) { c = 1; goto L_SENDB; }
-    CASE(OP_SSEND1, BB) { regs[a] = regs[0]; c = 1; goto L_SENDB; }
+    CASE(OP_SEND1, NN) { c = 1; goto L_SENDB; }
+    CASE(OP_SSEND1, NN) { regs[a] = regs[0]; c = 1; goto L_SENDB; }
   }
   END_DISPATCH;
 #undef regs

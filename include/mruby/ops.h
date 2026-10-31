@@ -5,6 +5,7 @@
    + BBB: 8+8+8bit
    + BS: 8+16bit
    + BSS: 8+16+16bit
+   + NN: 4+4bit
    + S: 16bit
    + W: 24bit
 */
@@ -13,7 +14,7 @@
 operation code    operands      semantics
 ------------------------------------------------------------------------*/
 OPCODE(NOP,        Z)        /* no operation */
-OPCODE(MOVE,       BB)       /* R[a] = R[b] */
+OPCODE(MOVE,       NN)       /* R[a] = R[b] */
 OPCODE(LOADL,      BB)       /* R[a] = Pool[b] */
 OPCODE(LOADI8,     BB)       /* R[a] = mrb_int(b) */
 OPCODE(LOADINEG,   BB)       /* R[a] = mrb_int(-b) */
@@ -28,7 +29,7 @@ OPCODE(LOADI_6,    B)        /* R[a] = mrb_int(6) */
 OPCODE(LOADI_7,    B)        /* R[a] = mrb_int(7) */
 OPCODE(LOADI16,    BS)       /* R[a] = mrb_int(b) */
 OPCODE(LOADI32,    BSS)      /* R[a] = mrb_int((b<<16)+c) */
-OPCODE(LOADSYM,    BB)       /* R[a] = Syms[b] */
+OPCODE(LOADSYM,    NN)       /* R[a] = Syms[b] */
 OPCODE(LOADNIL,    B)        /* R[a] = nil */
 OPCODE(LOADSELF,   B)        /* R[a] = self */
 OPCODE(LOADTRUE,   B)        /* R[a] = true */
@@ -41,7 +42,7 @@ OPCODE(GETIV,      BB)       /* R[a] = ivget(Syms[b]) */
 OPCODE(SETIV,      BB)       /* ivset(Syms[b],R[a]) */
 OPCODE(GETCV,      BB)       /* R[a] = cvget(Syms[b]) */
 OPCODE(SETCV,      BB)       /* cvset(Syms[b],R[a]) */
-OPCODE(GETCONST,   BB)       /* R[a] = constget(Syms[b]) */
+OPCODE(GETCONST,   NN)       /* R[a] = constget(Syms[b]) */
 OPCODE(SETCONST,   BB)       /* constset(Syms[b],R[a]) */
 OPCODE(GETMCNST,   BB)       /* R[a] = R[a]::Syms[b] */
 OPCODE(SETMCNST,   BB)       /* R[a+1]::Syms[b] = R[a] */
@@ -60,10 +61,10 @@ OPCODE(RESCUE,     BB)       /* R[b] = R[a].isa?(R[b]) */
 OPCODE(RAISEIF,    B)        /* raise(R[a]) if R[a] */
 OPCODE(MATCHERR,   B)        /* raise NoMatchingPatternError unless R[a] */
 OPCODE(SSEND,      BBB)      /* R[a] = self.send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..) (c=n|k<<4) */
-OPCODE(SSEND0,     BB)       /* R[a] = self.send(Syms[b]) (no args) */
+OPCODE(SSEND0,     NN)       /* R[a] = self.send(Syms[b]) (no args) */
 OPCODE(SSENDB,     BBB)      /* R[a] = self.send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..,&R[a+n+2k+1]) */
 OPCODE(SEND,       BBB)      /* R[a] = R[a].send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..) (c=n|k<<4) */
-OPCODE(SEND0,      BB)       /* R[a] = R[a].send(Syms[b]) (no args) */
+OPCODE(SEND0,      NN)       /* R[a] = R[a].send(Syms[b]) (no args) */
 OPCODE(SENDB,      BBB)      /* R[a] = R[a].send(Syms[b],R[a+1]..,R[a+n+1]:R[a+n+2]..,&R[a+n+2k+1]) */
 OPCODE(CALL,       Z)        /* self.call(*, **, &) (But overlay the current call frame; tailcall) */
 OPCODE(BLKCALL,    BB)       /* R[a] = R[a].call(R[a+1],... ,R[a+b]); direct block call */
@@ -104,13 +105,13 @@ OPCODE(ASET,       BBB)      /* R[b][c] = R[a] */
 OPCODE(APOST,      BBB)      /* *R[a],R[a+1]..R[a+c] = R[a][b..] */
 OPCODE(INTERN,     B)        /* R[a] = intern(R[a]) */
 OPCODE(SYMBOL,     BB)       /* R[a] = intern(Pool[b]) */
-OPCODE(STRING,     BB)       /* R[a] = str_dup(Pool[b]) */
+OPCODE(STRING,     NN)       /* R[a] = str_dup(Pool[b]) */
 OPCODE(STRCAT,     B)        /* str_cat(R[a],R[a+1]) */
 OPCODE(HASH,       BB)       /* R[a] = hash_new(R[a],R[a+1]..R[a+b*2-1]) */
 OPCODE(HASHADD,    BB)       /* hash_push(R[a],R[a+1]..R[a+b*2]) */
 OPCODE(HASHCAT,    B)        /* R[a] = hash_cat(R[a],R[a+1]) */
 OPCODE(LAMBDA,     BB)       /* R[a] = lambda(Irep[b],L_LAMBDA) */
-OPCODE(BLOCK,      BB)       /* R[a] = lambda(Irep[b],L_BLOCK) */
+OPCODE(BLOCK,      NN)       /* R[a] = lambda(Irep[b],L_BLOCK) */
 OPCODE(METHOD,     BB)       /* R[a] = lambda(Irep[b],L_METHOD) */
 OPCODE(RANGE_INC,  B)        /* R[a] = range_new(R[a],R[a+1],FALSE) */
 OPCODE(RANGE_EXC,  B)        /* R[a] = range_new(R[a],R[a+1],TRUE) */
@@ -135,9 +136,6 @@ OPCODE(STOP,       Z)        /* stop VM */
 OPCODE(ENTER0,     Z)
 OPCODE(ENTER1,     Z)
 OPCODE(ENTER2,     Z)
-OPCODE(C_MOVE,     NN)
-OPCODE(C_LOADSYM,  NN)
-OPCODE(C_STRING,   NN)
 OPCODE(RETURN0,    Z)
 OPCODE(RETURN1,    Z)
 OPCODE(RETURN2,    Z)
@@ -146,9 +144,5 @@ OPCODE(RETURN4,    Z)
 OPCODE(RETURN5,    Z)
 OPCODE(RETURN6,    Z)
 OPCODE(RETURN7,    Z)
-OPCODE(C_SSEND0,   NN)
-OPCODE(C_SEND0,    NN)
-OPCODE(C_SSEND1,   NN)
-OPCODE(C_SEND1,    NN)
-OPCODE(SSEND1,     BB)
-OPCODE(SEND1,      BB)
+OPCODE(SSEND1,     NN)
+OPCODE(SEND1,      NN)
