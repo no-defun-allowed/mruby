@@ -48,6 +48,15 @@ mrb_packed_int_len(uint32_t num)
   return llen;
 }
 
+/* The line numbers aren't monotonically increasing w.r.t program counters.
+ * We don't really want to encode FF FF FF FF for a small integer, so we map
+ * small integers of either polarity onto small positive integers before
+ * integer-packing.
+ * A negative integer N is mapped to -2N - 1, a positive integer to 2N.
+ * i.e. we store the "sign bit" in the LSB and shift every other bit over. */
+static inline uint32_t swizzle_i2u(int32_t n) { return n < 0 ? 2 * -n + 1 : 2 * n; }
+static inline int32_t swizzle_u2i(uint32_t n) { return n & 1 ? -(n >> 1) : n >> 1; }
+
 /*
  * Encodes a 32-bit unsigned integer `num` into a variable-length packed format
  * and writes it to the byte array `p`.
@@ -120,8 +129,8 @@ debug_get_line(mrb_state *mrb, mrb_irep_debug_info_file* f, uint32_t pc)
       uint32_t pos = 0, line = 0;
       while (p < pend) {
         pos += mrb_packed_int_decode(p, &p);
-        uint32_t line_diff = mrb_packed_int_decode(p, &p);
         if (pc < pos) break;
+        uint32_t line_diff = swizzle_u2i(mrb_packed_int_decode(p, &p));
         line += line_diff;
       }
       return line;
@@ -249,7 +258,7 @@ mrb_debug_info_append_file(mrb_state *mrb, mrb_irep_debug_info *d,
     if (lines[start_pos + i] == prev_line) continue;
     packed_size += mrb_packed_int_len(start_pos+i-prev_pc);
     prev_pc = start_pos+i;
-    packed_size += mrb_packed_int_len(lines[start_pos+i]-prev_line);
+    packed_size += mrb_packed_int_len(swizzle_i2u(lines[start_pos+i]-prev_line));
     prev_line = lines[start_pos + i];
   }
   f->lines.packed_map = p = (uint8_t*)mrb_malloc(mrb, packed_size);
@@ -258,7 +267,7 @@ mrb_debug_info_append_file(mrb_state *mrb, mrb_irep_debug_info *d,
     if (lines[start_pos + i] == prev_line) continue;
     p += mrb_packed_int_encode(start_pos+i-prev_pc, p);
     prev_pc = start_pos + i;
-    p += mrb_packed_int_encode(lines[start_pos + i]-prev_line, p);
+    p += mrb_packed_int_encode(swizzle_i2u(lines[start_pos + i]-prev_line), p);
     prev_line = lines[start_pos + i];
   }
   f->line_entry_count = (uint32_t)packed_size;

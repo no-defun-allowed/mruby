@@ -92,12 +92,21 @@ print_args(uint16_t i, FILE *out)
 
 #define CASE(insn,ops) case insn: FETCH_ ## ops (); L_ ## insn
 
-static int debug_size(const mrb_irep *irep) {
+static int debug_size(const mrb_irep *irep, FILE *out) {
   if (!irep->debug_info) return 0;
   int sum = 0;
-  for (int i = 0; i < irep->debug_info->flen; i++)
-    if (irep->debug_info->files[i])
-      sum += irep->debug_info->files[i]->line_entry_count;
+  for (int i = 0; i < irep->debug_info->flen; i++) {
+    mrb_irep_debug_info_file *file = irep->debug_info->files[i];
+    if (file) {
+      if (file->line_type == mrb_debug_line_packed_map) {
+        fprintf(out, "debug info:\n  ");
+        for (int j = 0; j < file->line_entry_count; j++)
+          fprintf(out, "%02x ", file->lines.packed_map[j]);
+        fprintf(out, "\n");
+      }
+      sum += file->line_entry_count;
+    }
+  }
   return sum;
 }
 
@@ -109,7 +118,7 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
   if (!irep) return;
   fprintf(out, "irep %p nregs=%d nlocals=%d pools=%d syms=%d reps=%d ilen=%d dlen=%d\n", (void*)irep,
           irep->nregs, irep->nlocals, (int)irep->plen, (int)irep->slen, (int)irep->rlen, (int)irep->ilen,
-          debug_size(irep));
+          debug_size(irep, out));
 
   if (irep->lv) {
     int head = FALSE;
