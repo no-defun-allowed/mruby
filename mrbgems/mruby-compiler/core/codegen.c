@@ -425,22 +425,16 @@ static void
 genop_NN(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
 {
   s->lastpc = s->pc;
-  if (a > 0xf && b > 0xf) {
+  if (a > 0xff || b > 0xff) {
     gen_B(s, OP_EXT3);
     gen_B(s, i);
     gen_S(s, a);
     gen_S(s, b);
   }
-  else if (b > 0xf) {
-    gen_B(s, OP_EXT2);
-    gen_B(s, i);
-    gen_B(s, (uint8_t)a);
-    gen_S(s, b);
-  }
-  else if (a > 0xf) {
+  else if (b > 0xf || a > 0xf) {
     gen_B(s, OP_EXT1);
     gen_B(s, i);
-    gen_S(s, a);
+    gen_B(s, (uint8_t)a);
     gen_B(s, (uint8_t)b);
   }
   else {
@@ -626,7 +620,7 @@ static uint8_t mrb_insn_size[] = {
 #undef BS
 #undef BSS
 };
-#define NN BB
+#define NN 3
 /* EXT1 instruction sizes */
 static uint8_t mrb_insn_size1[] = {
 #define B 3
@@ -650,6 +644,7 @@ static uint8_t mrb_insn_size2[] = {
 #undef BBB
 #undef BS
 #undef BSS
+#undef NN
 };
 /* EXT3 instruction sizes */
 #define B 3
@@ -657,6 +652,7 @@ static uint8_t mrb_insn_size2[] = {
 #define BBB 6
 #define BS 5
 #define BSS 7
+#define NN 5
 static uint8_t mrb_insn_size3[] = {
 #include <mruby/ops.h>
 };

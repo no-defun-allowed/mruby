@@ -50,7 +50,7 @@ enum mrb_insn {
 #define FETCH_BSS_1() do {a=READ_S(); b=READ_S();c=READ_S();} while (0)
 #define FETCH_S_1() FETCH_S()
 #define FETCH_W_1() FETCH_W()
-#define FETCH_NN_1() FETCH_BB_1()
+#define FETCH_NN_1() FETCH_BB()
 
 /* with OP_EXT2 (2nd 16bit) */
 #define FETCH_Z_2() FETCH_Z()
@@ -61,7 +61,7 @@ enum mrb_insn {
 #define FETCH_BSS_2() FETCH_BSS()
 #define FETCH_S_2() FETCH_S()
 #define FETCH_W_2() FETCH_W()
-#define FETCH_NN_2() FETCH_BB_2()
+#define FETCH_NN_2() FETCH_BB()
 
 /* with OP_EXT3 (1st & 2nd 16bit) */
 #define FETCH_Z_3() FETCH_Z()
