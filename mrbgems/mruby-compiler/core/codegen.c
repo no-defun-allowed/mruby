@@ -358,7 +358,7 @@ genop_0(codegen_scope *s, mrb_code i)
 
 /*
  * Generates an opcode `i` with a single 16-bit operand `a`.
- * If `a` is larger than 0xFF (255), it prepends `OP_EXT1` and emits `a` as a short.
+ * If `a` is larger than 0xFF (255), it prepends `OP_EXT2` and emits `a` as a short.
  * Otherwise, it emits `a` as a single byte.
  * Updates `s->lastpc`.
  *
@@ -371,7 +371,7 @@ genop_1(codegen_scope *s, mrb_code i, uint16_t a)
 {
   s->lastpc = s->pc;
   if (a > 0xff) {
-    gen_B(s, OP_EXT1);
+    gen_B(s, OP_EXT2);
     gen_B(s, i);
     gen_S(s, a);
   }
@@ -383,7 +383,7 @@ genop_1(codegen_scope *s, mrb_code i, uint16_t a)
 
 /*
  * Generates an opcode `i` with two 16-bit operands `a` and `b`.
- * It handles operand extensions (`OP_EXT1`, `OP_EXT2`, `OP_EXT3`)
+ * It handles operand extension (`OP_EXT2`)
  * based on whether `a` and/or `b` are larger than 0xFF.
  * Updates `s->lastpc`.
  *
@@ -396,23 +396,11 @@ static void
 genop_2(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
 {
   s->lastpc = s->pc;
-  if (a > 0xff && b > 0xff) {
-    gen_B(s, OP_EXT3);
-    gen_B(s, i);
-    gen_S(s, a);
-    gen_S(s, b);
-  }
-  else if (b > 0xff) {
+  if (a > 0xff || b > 0xff) {
     gen_B(s, OP_EXT2);
     gen_B(s, i);
-    gen_B(s, (uint8_t)a);
-    gen_S(s, b);
-  }
-  else if (a > 0xff) {
-    gen_B(s, OP_EXT1);
-    gen_B(s, i);
     gen_S(s, a);
-    gen_B(s, (uint8_t)b);
+    gen_S(s, b);
   }
   else {
     gen_B(s, i);
@@ -426,7 +414,7 @@ genop_NN(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
 {
   s->lastpc = s->pc;
   if (a > 0xff || b > 0xff) {
-    gen_B(s, OP_EXT3);
+    gen_B(s, OP_EXT2);
     gen_B(s, i);
     gen_S(s, a);
     gen_S(s, b);
@@ -464,7 +452,7 @@ genop_3(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b, uint16_t c)
 
 /*
  * Generates an opcode `i` with a 16-bit operand `a` and a 16-bit operand `b`.
- * Operand `a` is emitted using `genop_1` (which handles `OP_EXT1` if needed).
+ * Operand `a` is emitted using `genop_1` (which handles `OP_EXT2` if needed).
  * Operand `b` is emitted as a 2-byte short using `gen_S`.
  * Updates `s->lastpc` (via `genop_1`).
  *
@@ -482,7 +470,7 @@ genop_2S(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
 
 /*
  * Generates an opcode `i` with a 16-bit operand `a` and a 32-bit operand `b`.
- * Operand `a` is emitted using `genop_1` (handling `OP_EXT1`).
+ * Operand `a` is emitted using `genop_1` (handling `OP_EXT2`).
  * Operand `b` is emitted as two 2-byte shorts (high word then low word).
  * Updates `s->lastpc` (via `genop_1`).
  *
@@ -539,7 +527,7 @@ no_optimize(codegen_scope *s)
  *
  * It reads the opcode and its operands from the bytecode stream and populates
  * a `mrb_insn_data` structure. This function handles standard opcodes as well
- * as extended opcodes (OP_EXT1, OP_EXT2, OP_EXT3) to correctly parse operands
+ * as extended opcodes (OP_EXT1, OP_EXT2) to correctly parse operands
  * of varying sizes. This is primarily used by the peephole optimizer and
  * instruction analysis utilities.
  *
@@ -581,14 +569,6 @@ mrb_decode_insn(const mrb_code *pc)
 #undef OPCODE
     }
     break;
-  case OP_EXT3:
-    insn = READ_B();
-    switch (insn) {
-#define OPCODE(i,x) case OP_ ## i: FETCH_ ## x ## _3 (); break;
-#include <mruby/ops.h>
-#undef OPCODE
-    }
-    break;
   default:
     break;
   }
@@ -613,55 +593,35 @@ static uint8_t mrb_insn_size[] = {
 #define BS 4
 #define BSS 6
 #include <mruby/ops.h>
+#undef NN
+};
+/* EXT1 instruction sizes */
+static uint8_t mrb_insn_size1[] = {
+#define NN 3
+#include <mruby/ops.h>
 #undef B
 #undef NN
 #undef BB
 #undef BBB
-#undef BS
-#undef BSS
-};
-#define NN 3
-/* EXT1 instruction sizes */
-static uint8_t mrb_insn_size1[] = {
-#define B 3
-#define BB 4
-#define BBB 5
-#define BS 5
-#define BSS 7
-#include <mruby/ops.h>
-#undef B
 #undef BS
 #undef BSS
 };
 /* EXT2 instruction sizes */
-static uint8_t mrb_insn_size2[] = {
-#define B 2
-#define BS 4
-#define BSS 6
-#include <mruby/ops.h>
-#undef B
-#undef BB
-#undef BBB
-#undef BS
-#undef BSS
-#undef NN
-};
-/* EXT3 instruction sizes */
 #define B 3
+#define NN 5
 #define BB 5
 #define BBB 6
 #define BS 5
 #define BSS 7
-#define NN 5
-static uint8_t mrb_insn_size3[] = {
+static uint8_t mrb_insn_size2[] = {
 #include <mruby/ops.h>
 };
 #undef B
+#undef NN
 #undef BB
 #undef BBB
 #undef BS
 #undef BSS
-#undef NN
 #undef OPCODE
 
 /*
@@ -692,9 +652,6 @@ mrb_prev_pc(codegen_scope *s, const mrb_code *pc)
       break;
     case OP_EXT2:
       i += mrb_insn_size2[i[1]] + 1;
-      break;
-    case OP_EXT3:
-      i += mrb_insn_size3[i[1]] + 1;
       break;
     default:
       i += mrb_insn_size[i[0]];
@@ -873,7 +830,7 @@ genjmp2(codegen_scope *s, mrb_code i, uint16_t a, uint32_t pc, int val)
   }
 
   if (a > 0xff) {
-    gen_B(s, OP_EXT1);
+    gen_B(s, OP_EXT2);
     genop_0(s, i);
     gen_S(s, a);
   }
@@ -1336,9 +1293,6 @@ merge_op_string(codegen_scope *s, uint16_t dst, uint16_t b1, uint16_t b2, const 
       break;
     case OP_EXT2:
       i += mrb_insn_size2[i[1]] + 1;
-      break;
-    case OP_EXT3:
-      i += mrb_insn_size3[i[1]] + 1;
       break;
     default:
       i += mrb_insn_size[i[0]];

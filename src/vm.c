@@ -3561,16 +3561,6 @@ RETRY_TRY_BLOCK:
       }
       NEXT;
     }
-    CASE(OP_EXT3, Z) {
-      const mrb_code *pc = ci->pc;
-      insn = READ_B();
-      switch (insn) {
-#define OPCODE(insn,ops) case OP_ ## insn: FETCH_ ## ops ## _3(); ci->pc = pc; goto L_OP_ ## insn ## _BODY;
-#include <mruby/ops.h>
-#undef OPCODE
-      }
-      NEXT;
-    }
 
     CASE(OP_STOP, Z) {
       /*        stop VM */

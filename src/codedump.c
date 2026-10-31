@@ -647,16 +647,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
 #undef OPCODE
       }
       break;
-    CASE(OP_EXT3, Z):
-      fprintf(out, "EXT3\n");
-      print_header(mrb, irep, pc-irep->iseq, out);
-      ins = READ_B();
-      switch (ins) {
-#define OPCODE(i,x) case OP_ ## i: FETCH_ ## x ## _3 (); goto L_OP_ ## i;
-#include <mruby/ops.h>
-#undef OPCODE
-      }
-      break;
 
     default:
       fprintf(out, "unknown_op (0x%x)\n", ins);

@@ -113,20 +113,19 @@ OPCODE(SCLASS,     B)        /* R[a] = R[a].singleton_class */
 OPCODE(TCLASS,     B)        /* R[a] = target_class */
 OPCODE(DEBUG,      BBB)      /* print a,b,c */
 OPCODE(ERR,        B)        /* raise(LocalJumpError, Pool[a]) */
-OPCODE(EXT1,       Z)        /* make 1st operand (a) 16bit */
-OPCODE(EXT2,       Z)        /* make 2nd operand (b) 16bit */
-OPCODE(EXT3,       Z)        /* make 1st and 2nd operands 16bit */
+OPCODE(EXT1,       Z)        /* make operands at least 8-bit */
+OPCODE(EXT2,       Z)        /* make operands 16-bit */
 OPCODE(STOP,       Z)        /* stop VM */
-OPCODE(ENTER0,     Z)
-OPCODE(ENTER1,     Z)
-OPCODE(ENTER2,     Z)
-OPCODE(RETURN0,    Z)
-OPCODE(RETURN1,    Z)
+OPCODE(ENTER0,     Z)        /* zero-argument entry */
+OPCODE(ENTER1,     Z)        /* one-argument entry */
+OPCODE(ENTER2,     Z)        /* two-argument entry */
+OPCODE(RETURN0,    Z)        /* return R[0] */
+OPCODE(RETURN1,    Z)        /* ... */
 OPCODE(RETURN2,    Z)
 OPCODE(RETURN3,    Z)
 OPCODE(RETURN4,    Z)
 OPCODE(RETURN5,    Z)
 OPCODE(RETURN6,    Z)
-OPCODE(RETURN7,    Z)
-OPCODE(SSEND1,     NN)
-OPCODE(SEND1,      NN)
+OPCODE(RETURN7,    Z)           /* return R[7] */
+OPCODE(SSEND1,     NN)          /* R[a] = self.send(Syms[b], R[a+1]) */
+OPCODE(SEND1,      NN)          /* R[a] = R[a].send(Syms[b], R[a+1]) */
