@@ -34,18 +34,18 @@ OPCODE(LOADNIL,    B)        /* R[a] = nil */
 OPCODE(LOADSELF,   B)        /* R[a] = self */
 OPCODE(LOADTRUE,   B)        /* R[a] = true */
 OPCODE(LOADFALSE,  B)        /* R[a] = false */
-OPCODE(GETGV,      BB)       /* R[a] = getglobal(Syms[b]) */
-OPCODE(SETGV,      BB)       /* setglobal(Syms[b], R[a]) */
-OPCODE(GETSV,      BB)       /* R[a] = Special[Syms[b]] */
-OPCODE(SETSV,      BB)       /* Special[Syms[b]] = R[a] */
-OPCODE(GETIV,      BB)       /* R[a] = ivget(Syms[b]) */
-OPCODE(SETIV,      BB)       /* ivset(Syms[b],R[a]) */
-OPCODE(GETCV,      BB)       /* R[a] = cvget(Syms[b]) */
-OPCODE(SETCV,      BB)       /* cvset(Syms[b],R[a]) */
+OPCODE(GETGV,      NN)       /* R[a] = getglobal(Syms[b]) */
+OPCODE(SETGV,      NN)       /* setglobal(Syms[b], R[a]) */
+OPCODE(GETSV,      NN)       /* R[a] = Special[Syms[b]] */
+OPCODE(SETSV,      NN)       /* Special[Syms[b]] = R[a] */
+OPCODE(GETIV,      NN)       /* R[a] = ivget(Syms[b]) */
+OPCODE(SETIV,      NN)       /* ivset(Syms[b],R[a]) */
+OPCODE(GETCV,      NN)       /* R[a] = cvget(Syms[b]) */
+OPCODE(SETCV,      NN)       /* cvset(Syms[b],R[a]) */
 OPCODE(GETCONST,   NN)       /* R[a] = constget(Syms[b]) */
-OPCODE(SETCONST,   BB)       /* constset(Syms[b],R[a]) */
-OPCODE(GETMCNST,   BB)       /* R[a] = R[a]::Syms[b] */
-OPCODE(SETMCNST,   BB)       /* R[a+1]::Syms[b] = R[a] */
+OPCODE(SETCONST,   NN)       /* constset(Syms[b],R[a]) */
+OPCODE(GETMCNST,   NN)       /* R[a] = R[a]::Syms[b] */
+OPCODE(SETMCNST,   NN)       /* R[a+1]::Syms[b] = R[a] */
 OPCODE(GETUPVAR,   BBB)      /* R[a] = uvget(b,c) */
 OPCODE(SETUPVAR,   BBB)      /* uvset(b,c,R[a]) */
 OPCODE(GETIDX,     B)        /* R[a] = R[a][R[a+1]] */
@@ -71,9 +71,9 @@ OPCODE(BLKCALL,    BB)       /* R[a] = R[a].call(R[a+1],... ,R[a+b]); direct blo
 OPCODE(SUPER,      BB)       /* R[a] = super(R[a+1],... ,R[a+b+1]) */
 OPCODE(ARGARY,     BS)       /* R[a] = argument array (16=m5:r1:m5:d1:lv4) */
 OPCODE(ENTER,      W)        /* arg setup according to flags (24=n1:m5:o5:r1:m5:k5:d1:b1) */
-OPCODE(KEY_P,      BB)       /* R[a] = kdict.key?(Syms[b]) */
+OPCODE(KEY_P,      NN)       /* R[a] = kdict.key?(Syms[b]) */
 OPCODE(KEYEND,     Z)        /* raise unless kdict.empty? */
-OPCODE(KARG,       BB)       /* R[a] = kdict[Syms[b]]; kdict.delete(Syms[b]) */
+OPCODE(KARG,       NN)       /* R[a] = kdict[Syms[b]]; kdict.delete(Syms[b]) */
 OPCODE(RETURN,     B)        /* return R[a] (normal) */
 OPCODE(RETURN_BLK, B)        /* return R[a] (in-block return) */
 OPCODE(RETSELF,    Z)        /* return self */

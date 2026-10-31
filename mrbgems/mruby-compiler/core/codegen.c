@@ -955,13 +955,14 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       /* fall through */
     case OP_LOADI8: case OP_LOADINEG:
     case OP_LOADL:
-    case OP_GETGV: case OP_GETSV: case OP_GETIV: case OP_GETCV:
     case OP_LAMBDA: case OP_METHOD: case OP_BLKPUSH:
       if (data.a != src || data.a < s->nlocals) break;
       rewind_pc(s);
       genop_2(s, data.insn, dst, data.b);
       return;
-    case OP_GETCONST: case OP_LOADSYM: case OP_STRING: case OP_BLOCK:
+    case OP_GETCONST: case OP_LOADSYM: case OP_STRING:
+    case OP_GETGV: case OP_GETSV: case OP_GETIV: case OP_GETCV:
+    case OP_BLOCK:
       if (data.a != src || data.a < s->nlocals) break;
       rewind_pc(s);
       genop_NN(s, data.insn, dst, data.b);
@@ -1790,6 +1791,14 @@ gen_load_op2(codegen_scope *s, mrb_code op, uint16_t arg, int val)
   push();
 }
 
+static void
+gen_load_opNN(codegen_scope *s, mrb_code op, uint16_t arg, int val)
+{
+  if (!val) return;
+  genop_NN(s, op, cursp(), arg);
+  push();
+}
+
 /* Helper function for conditional nil loading - loads nil only if val is needed */
 static void
 gen_load_nil(codegen_scope *s, int val)
@@ -2140,7 +2149,7 @@ gen_setxv(codegen_scope *s, uint8_t op, uint16_t dst, mrb_sym sym, int val)
       rewind_pc(s);
     }
   }
-  genop_2(s, op, dst, idx);
+  genop_NN(s, op, dst, idx);
 }
 
 /*
@@ -2486,7 +2495,7 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
 
         if (def_arg) {
           int idx;
-          genop_2(s, OP_KEY_P, lv_idx(s, kwd_sym), sym_idx(s, kwd_sym));
+          genop_NN(s, OP_KEY_P, lv_idx(s, kwd_sym), sym_idx(s, kwd_sym));
           jmpif_key_p = genjmp2_0(s, OP_JMPIF, lv_idx(s, kwd_sym), NOVAL);
           codegen(s, def_arg, VAL);
           pop();
@@ -2500,7 +2509,7 @@ lambda_body(codegen_scope *s, node *locals, struct mrb_ast_args *args, node *bod
           jmp_def_set = genjmp_0(s, OP_JMP);
           dispatch(s, jmpif_key_p);
         }
-        genop_2(s, OP_KARG, lv_idx(s, kwd_sym), sym_idx(s, kwd_sym));
+        genop_NN(s, OP_KARG, lv_idx(s, kwd_sym), sym_idx(s, kwd_sym));
         if (jmp_def_set != -1) {
           dispatch(s, jmp_def_set);
         }
@@ -3044,7 +3053,7 @@ gen_xvar(codegen_scope *s, mrb_sym sym, int val, uint8_t op)
   if (!val) return;
   int i = sym_idx(s, sym);
 
-  genop_2(s, op, cursp(), i);
+  genop_NN(s, op, cursp(), i);
   push();
 }
 
@@ -6061,7 +6070,7 @@ codegen_regx(codegen_scope *s, node *varnode, int val)
     int off;
 
     genop_1(s, OP_OCLASS, cursp());
-    genop_2(s, OP_GETMCNST, cursp(), sym);
+    genop_NN(s, OP_GETMCNST, cursp(), sym);
     push();
 
     /* Generate regex pattern using common cons list function */
@@ -6130,7 +6139,7 @@ codegen_nth_ref(codegen_scope *s, node *varnode, int val)
 
   str = mrb_format(mrb, "$%d", n->nth);
   sym = sym_idx(s, mrb_intern_str(mrb, str));
-  gen_load_op2(s, OP_GETGV, sym, val);
+  gen_load_opNN(s, OP_GETGV, sym, val);
 }
 
 static void
@@ -6139,7 +6148,7 @@ codegen_back_ref(codegen_scope *s, node *varnode, int val)
   struct mrb_ast_back_ref_node *n = (struct mrb_ast_back_ref_node*)varnode;
   char buf[] = {'$', (char)n->type};
   int sym = sym_idx(s, mrb_intern(s->mrb, buf, sizeof(buf)));
-  gen_load_op2(s, OP_GETGV, sym, val);
+  gen_load_opNN(s, OP_GETGV, sym, val);
 }
 
 static void
@@ -6248,7 +6257,7 @@ codegen_colon2(codegen_scope *s, node *varnode, int val)
   int sym = sym_idx(s, n->name);
   codegen(s, n->base, VAL);
   pop();
-  genop_2(s, OP_GETMCNST, cursp(), sym);
+  genop_NN(s, OP_GETMCNST, cursp(), sym);
   if (val) push();
 }
 
@@ -6258,7 +6267,7 @@ codegen_colon3(codegen_scope *s, node *varnode, int val)
   struct mrb_ast_colon3_node *n = (struct mrb_ast_colon3_node*)varnode;
   int sym = sym_idx(s, n->name);
   genop_1(s, OP_OCLASS, cursp());
-  genop_2(s, OP_GETMCNST, cursp(), sym);
+  genop_NN(s, OP_GETMCNST, cursp(), sym);
   if (val) push();
 }
 

@@ -1844,45 +1844,45 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_GETGV, BB) {
+    CASE(OP_GETGV, NN) {
       mrb_value val = mrb_gv_get(mrb, irep->syms[b]);
       ci = mrb->c->ci;
       regs[a] = val;
       NEXT;
     }
 
-    CASE(OP_SETGV, BB) {
+    CASE(OP_SETGV, NN) {
       mrb_gv_set(mrb, irep->syms[b], regs[a]);
       ci = mrb->c->ci;
       NEXT;
     }
 
-    CASE(OP_GETSV, BB) {
+    CASE(OP_GETSV, NN) {
       mrb_value val = mrb_vm_special_get(mrb, irep->syms[b]);
       ci = mrb->c->ci;
       regs[a] = val;
       NEXT;
     }
 
-    CASE(OP_SETSV, BB) {
+    CASE(OP_SETSV, NN) {
       mrb_vm_special_set(mrb, irep->syms[b], regs[a]);
       ci = mrb->c->ci;
       NEXT;
     }
 
-    CASE(OP_GETIV, BB) {
+    CASE(OP_GETIV, NN) {
       regs[a] = mrb_iv_get(mrb, regs[0], irep->syms[b]);
       ci = mrb->c->ci;
       NEXT;
     }
 
-    CASE(OP_SETIV, BB) {
+    CASE(OP_SETIV, NN) {
       mrb_iv_set(mrb, regs[0], irep->syms[b], regs[a]);
       ci = mrb->c->ci;
       NEXT;
     }
 
-    CASE(OP_GETCV, BB) {
+    CASE(OP_GETCV, NN) {
       mrb_value val;
       val = mrb_vm_cv_get(mrb, irep->syms[b]);
       ci = mrb->c->ci;
@@ -1890,7 +1890,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_SETCV, BB) {
+    CASE(OP_SETCV, NN) {
       mrb_vm_cv_set(mrb, irep->syms[b], regs[a]);
       ci = mrb->c->ci;
       NEXT;
@@ -2025,7 +2025,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_SETCONST, BB) {
+    CASE(OP_SETCONST, NN) {
       ci = mrb->c->ci;
       struct RClass *c = MRB_PROC_TARGET_CLASS(ci->proc);
       if (!c) c = mrb->object_class;
@@ -2033,14 +2033,14 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_GETMCNST, BB) {
+    CASE(OP_GETMCNST, NN) {
       mrb_value v = mrb_const_get(mrb, regs[a], irep->syms[b]);
       ci = mrb->c->ci;
       regs[a] = v;
       NEXT;
     }
 
-    CASE(OP_SETMCNST, BB) {
+    CASE(OP_SETMCNST, NN) {
       mrb_const_set(mrb, regs[a+1], irep->syms[b], regs[a]);
       ci = mrb->c->ci;
       NEXT;
@@ -2705,7 +2705,7 @@ RETRY_TRY_BLOCK:
       JUMP;
     }
 
-    CASE(OP_KARG, BB) {
+    CASE(OP_KARG, NN) {
       mrb_value k = mrb_symbol_value(irep->syms[b]);
       mrb_int kidx = mrb_ci_kidx(ci);
       mrb_value kdict, v;
@@ -2720,7 +2720,7 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_KEY_P, BB) {
+    CASE(OP_KEY_P, NN) {
       mrb_value k = mrb_symbol_value(irep->syms[b]);
       mrb_int kidx = mrb_ci_kidx(ci);
       mrb_value kdict;
