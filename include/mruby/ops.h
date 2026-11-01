@@ -19,7 +19,6 @@ OPCODE(LOADL,      NN)       /* R[a] = Pool[b] */
 OPCODE(LOADI8,     NN)       /* R[a] = mrb_int(b) */
 OPCODE(LOADINEG,   NN)       /* R[a] = mrb_int(-b) */
 OPCODE(LOADI16,    BS)       /* R[a] = mrb_int(b) */
-OPCODE(LOADI32,    BSS)      /* R[a] = mrb_int((b<<16)+c) */
 OPCODE(LOADSYM,    NN)       /* R[a] = Syms[b] */
 OPCODE(LOADNIL,    B)        /* R[a] = nil */
 OPCODE(LOADTRUE,   B)        /* R[a] = true */
@@ -88,8 +87,6 @@ OPCODE(ARYSPLAT,   B)        /* R[a] = ary_splat(R[a]) */
 OPCODE(AREF,       BBB)      /* R[a] = R[b][c] */
 OPCODE(ASET,       BBB)      /* R[b][c] = R[a] */
 OPCODE(APOST,      BBB)      /* *R[a],R[a+1]..R[a+c] = R[a][b..] */
-OPCODE(INTERN,     B)        /* R[a] = intern(R[a]) */
-OPCODE(SYMBOL,     BB)       /* R[a] = intern(Pool[b]) */
 OPCODE(STRING,     NN)       /* R[a] = str_dup(Pool[b]) */
 OPCODE(STRCAT,     B)        /* str_cat(R[a],R[a+1]) */
 OPCODE(HASH,       BB)       /* R[a] = hash_new(R[a],R[a+1]..R[a+b*2-1]) */
@@ -124,8 +121,6 @@ OPCODE(RETURN1,    Z)        /* ... */
 OPCODE(RETURN2,    Z)
 OPCODE(RETURN3,    Z)
 OPCODE(RETURN4,    Z)
-OPCODE(RETURN5,    Z)
-OPCODE(RETURN6,    Z)
-OPCODE(RETURN7,    Z)           /* return R[7] */
-OPCODE(SSEND1,     NN)          /* R[a] = self.send(Syms[b], R[a+1]) */
-OPCODE(SEND1,      NN)          /* R[a] = R[a].send(Syms[b], R[a+1]) */
+OPCODE(RETURN5,    Z)        /* return R[5] */
+OPCODE(SSEND1,     NN)       /* R[a] = self.send(Syms[b], R[a+1]) */
+OPCODE(SEND1,      NN)       /* R[a] = R[a].send(Syms[b], R[a+1]) */

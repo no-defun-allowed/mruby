@@ -591,7 +591,6 @@ static uint8_t mrb_insn_size[] = {
 #define BB 3
 #define BBB 4
 #define BS 4
-#define BSS 6
 #include <mruby/ops.h>
 #undef NN
 };
@@ -604,7 +603,6 @@ static uint8_t mrb_insn_size1[] = {
 #undef BB
 #undef BBB
 #undef BS
-#undef BSS
 };
 /* EXT2 instruction sizes */
 #define B 3
@@ -612,7 +610,6 @@ static uint8_t mrb_insn_size1[] = {
 #define BB 5
 #define BBB 6
 #define BS 5
-#define BSS 7
 static uint8_t mrb_insn_size2[] = {
 #include <mruby/ops.h>
 };
@@ -621,7 +618,6 @@ static uint8_t mrb_insn_size2[] = {
 #undef BB
 #undef BBB
 #undef BS
-#undef BSS
 #undef OPCODE
 
 /*
@@ -923,14 +919,6 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       rewind_pc(s);
       genop_2S(s, data.insn, dst, data.b);
       return;
-    case OP_LOADI32:
-      if (data.a != src || data.a < s->nlocals) break;
-      else {
-        uint32_t i = (uint32_t)data.b<<16|data.c;
-        rewind_pc(s);
-        genop_2SS(s, data.insn, dst, i);
-      }
-      return;
     case OP_ARRAY:
       if (data.a != src || data.a < s->nlocals || data.a < dst) break;
       rewind_pc(s);
@@ -1096,7 +1084,10 @@ static void
 gen_return(codegen_scope *s, uint8_t op, uint16_t src)
 {
   if (no_peephole(s)) {
-    genop_1(s, op, src);
+    if (op == OP_RETURN && src < 6)
+      genop_0(s, OP_RETURN0 + src);
+    else
+      genop_1(s, op, src);
   }
   else {
     struct mrb_insn_data data = mrb_last_insn(s);
@@ -1106,7 +1097,7 @@ gen_return(codegen_scope *s, uint8_t op, uint16_t src)
       src = data.b;
     }
     if (data.insn != OP_RETURN) {
-      if (op == OP_RETURN && src < 8)
+      if (op == OP_RETURN && src < 6)
         genop_0(s, OP_RETURN0 + src);
       else
         genop_1(s, op, src);
@@ -1118,8 +1109,8 @@ gen_return(codegen_scope *s, uint8_t op, uint16_t src)
  * Attempts to extract a compile-time integer value from a given instruction.
  *
  * This function checks if the instruction described by `data` is one of
- * the integer loading opcodes (e.g., `OP_LOADI8`, `OP_LOADI16`, `OP_LOADI32`
- * or `OP_LOADL` where the literal pool entry is an integer.
+ * the integer loading opcodes (`OP_LOADI8`, `OP_LOADI16`, or `OP_LOADL`)
+ * where the literal pool entry is an integer.
  *
  * If successful, it stores the extracted integer value into the output
  * parameter `*n` and returns `TRUE`. Otherwise, it returns `FALSE`.
@@ -1141,10 +1132,6 @@ get_int_operand(codegen_scope *s, struct mrb_insn_data *data, mrb_int *n)
   case OP_LOADI8:
   case OP_LOADI16:
     *n = (int16_t)data->b;
-    return TRUE;
-
-  case OP_LOADI32:
-    *n = (int32_t)((uint32_t)data->b<<16)+data->c;
     return TRUE;
 
   case OP_LOADL:
@@ -2058,13 +2045,11 @@ gen_setxv(codegen_scope *s, uint8_t op, uint16_t dst, mrb_sym sym, int val)
  * It employs a series of checks to use specialized, shorter opcodes for common integer values:
  * - `OP_LOADINEG` for negative integers between -255 and -2 (operand is positive magnitude).
  * - `OP_LOADI16` for negative integers fitting in a signed 16-bit integer (INT16_MIN to -256).
- * - `OP_LOADI32` for negative integers fitting in a signed 32-bit integer (INT32_MIN to not fitting in 16-bit).
  * - `OP_LOADI8` for positive integers between 8 and 255.
  * - `OP_LOADI16` for positive integers fitting in a signed 16-bit integer (256 to INT16_MAX).
- * - `OP_LOADI32` for positive integers fitting in a signed 32-bit integer (not fitting in 16-bit to INT32_MAX).
  *
  * If the integer `i` does not fit any of these specialized opcodes (i.e., it's too large
- * or too small for `OP_LOADI32`), it falls back to `OP_LOADL`. This involves adding
+ * or too small for `OP_LOADI16`), it falls back to `OP_LOADL`. This involves adding
  * the integer to the IREP's literal pool using `new_lit_int` and then generating
  * `OP_LOADL` with the resulting pool index.
  *
@@ -2078,12 +2063,10 @@ gen_int(codegen_scope *s, uint16_t dst, mrb_int i)
   if (i < 0) {
     if (i >= -0xff) genop_NN(s, OP_LOADINEG, dst, (uint16_t)-i);
     else if (i >= INT16_MIN) genop_2S(s, OP_LOADI16, dst, (uint16_t)i);
-    else if (i >= INT32_MIN) genop_2SS(s, OP_LOADI32, dst, (uint32_t)i);
     else genop_NN(s, OP_LOADL, dst, new_lit_int(s, i));
   } else {
     if (i <= 0xff) genop_NN(s, OP_LOADI8, dst, (uint16_t)i);
     else if (i <= INT16_MAX) genop_2S(s, OP_LOADI16, dst, (uint16_t)i);
-    else if (i <= INT32_MAX) genop_2SS(s, OP_LOADI32, dst, (uint32_t)i);
     else genop_NN(s, OP_LOADL, dst, new_lit_int(s, i));
   }
 }
@@ -3075,17 +3058,7 @@ static void
 gen_intern(codegen_scope *s)
 {
   pop();
-  if (!no_peephole(s)) {
-    struct mrb_insn_data data = mrb_last_insn(s);
-
-    if (data.insn == OP_STRING && data.a == cursp()) {
-      rewind_pc(s);
-      genop_2(s, OP_SYMBOL, data.a, data.b);
-      push();
-      return;
-    }
-  }
-  genop_1(s, OP_INTERN, cursp());
+  genop_NN(s, OP_SEND0, cursp(), sym_idx(s, MRB_SYM(intern)));
   push();
 }
 

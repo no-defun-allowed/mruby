@@ -222,10 +222,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       fprintf(out, "LOADI16\tR%d\t%d", a, (int)(int16_t)b);
       print_lv_a(mrb, irep, a, out);
       break;
-    CASE(OP_LOADI32, BSS):
-      fprintf(out, "LOADI32\tR%d\t%d", a, (int32_t)(((uint32_t)b<<16)+c));
-      print_lv_a(mrb, irep, a, out);
-      break;
     CASE(OP_LOADSYM, NN):
       fprintf(out, "LOADSYM\tR%d\t:%s", a, mrb_sym_dump(mrb, irep->syms[b]));
       print_lv_a(mrb, irep, a, out);
@@ -516,15 +512,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
       fprintf(out, "APOST\t\tR%d\t%d\t%d", a, b, c);
       print_lv_a(mrb, irep, a, out);
       break;
-    CASE(OP_INTERN, B):
-      fprintf(out, "INTERN\tR%d\t", a);
-      print_lv_a(mrb, irep, a, out);
-      break;
-    CASE(OP_SYMBOL, BB):
-      mrb_assert((irep->pool[b].tt&IREP_TT_NFLAG)==0);
-      fprintf(out, "SYMBOL\tR%d\tL[%d]\t; %s", a, b, irep->pool[b].u.str);
-      print_lv_a(mrb, irep, a, out);
-      break;
     CASE(OP_STRING, NN):
       mrb_assert((irep->pool[b].tt&IREP_TT_NFLAG)==0);
       fprintf(out, "STRING\tR%d\tL[%d]", a, b);
@@ -616,8 +603,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
     CASE(OP_RETURN3, Z): fprintf(out, "RETURN3\n"); break;
     CASE(OP_RETURN4, Z): fprintf(out, "RETURN4\n"); break;
     CASE(OP_RETURN5, Z): fprintf(out, "RETURN5\n"); break;
-    CASE(OP_RETURN6, Z): fprintf(out, "RETURN6\n"); break;
-    CASE(OP_RETURN7, Z): fprintf(out, "RETURN7\n"); break;
     CASE(OP_SSEND1, NN):
       fprintf(out, "SSEND1\tR%d\t:%s\t", a, mrb_sym_dump(mrb, irep->syms[b]));
       print_args(1, out);

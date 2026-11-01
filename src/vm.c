@@ -1800,11 +1800,6 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_LOADI32, BSS) {
-      SET_INT_VALUE(mrb, regs[a], (int32_t)(((uint32_t)b<<16)+c));
-      NEXT;
-    }
-
     CASE(OP_LOADSYM, NN) {
       SET_SYM_VALUE(regs[a], irep->syms[b]);
       NEXT;
@@ -3248,29 +3243,6 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-    CASE(OP_INTERN, B) {
-      mrb_ensure_string_type(mrb, regs[a]);
-      mrb_sym sym = mrb_intern_str(mrb, regs[a]);
-      regs[a] = mrb_symbol_value(sym);
-      NEXT;
-    }
-
-    CASE(OP_SYMBOL, BB) {
-      size_t len;
-      mrb_sym sym;
-
-      mrb_assert((irep->pool[b].tt&IREP_TT_NFLAG)==0);
-      len = irep->pool[b].tt >> 2;
-      if (irep->pool[b].tt & IREP_TT_SFLAG) {
-        sym = mrb_intern_static(mrb, irep->pool[b].u.str, len);
-      }
-      else {
-        sym = mrb_intern(mrb, irep->pool[b].u.str, len);
-      }
-      regs[a] = mrb_symbol_value(sym);
-      NEXT;
-    }
-
     CASE(OP_STRING, NN) {
       mrb_int len;
 
@@ -3594,8 +3566,6 @@ RETRY_TRY_BLOCK:
     CASE(OP_RETURN3, Z) { a = 3; goto NORMAL_RETURN; }
     CASE(OP_RETURN4, Z) { a = 4; goto NORMAL_RETURN; }
     CASE(OP_RETURN5, Z) { a = 5; goto NORMAL_RETURN; }
-    CASE(OP_RETURN6, Z) { a = 6; goto NORMAL_RETURN; }
-    CASE(OP_RETURN7, Z) { a = 7; goto NORMAL_RETURN; }
     CASE(OP_SEND1, NN) { c = 1; goto L_SENDB; }
     CASE(OP_SSEND1, NN) { regs[a] = regs[0]; c = 1; goto L_SENDB; }
   }
