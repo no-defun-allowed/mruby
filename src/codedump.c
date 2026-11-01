@@ -428,9 +428,6 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
     CASE(OP_TDEF, BBB):
       fprintf(out, "TDEF\t\tR%d\t:%s\tI[%d]\n", a, mrb_sym_dump(mrb, irep->syms[b]), c);
       break;
-    CASE(OP_SDEF, BBB):
-      fprintf(out, "SDEF\t\tR%d\t:%s\tI[%d]\n", a, mrb_sym_dump(mrb, irep->syms[b]), c);
-      break;
     CASE(OP_UNDEF, B):
       fprintf(out, "UNDEF\t\t:%s\n", mrb_sym_dump(mrb, irep->syms[a]));
       break;
@@ -440,24 +437,8 @@ codedump(mrb_state *mrb, const mrb_irep *irep, FILE *out)
     CASE(OP_ADD, B):
       fprintf(out, "ADD\t\tR%d\t(R%d)\n", a, a+1);
       break;
-    CASE(OP_ADDI, BB):
-      fprintf(out, "ADDI\t\tR%d\t%d", a, b);
-      print_lv_a(mrb, irep, a, out);
-      break;
     CASE(OP_SUB, B):
       fprintf(out, "SUB\t\tR%d\t(R%d)\n", a, a+1);
-      break;
-    CASE(OP_SUBI, BB):
-      fprintf(out, "SUBI\t\tR%d\t%d", a, b);
-      print_lv_a(mrb, irep, a, out);
-      break;
-    CASE(OP_ADDILV, BBB):
-      fprintf(out, "ADDILV\tR%d\tR%d\t%d", a, b, c);
-      print_lv_a(mrb, irep, a, out);
-      break;
-    CASE(OP_SUBILV, BBB):
-      fprintf(out, "SUBILV\tR%d\tR%d\t%d", a, b, c);
-      print_lv_a(mrb, irep, a, out);
       break;
     CASE(OP_MUL, B):
       fprintf(out, "MUL\t\tR%d\t(R%d)\n", a, a+1);

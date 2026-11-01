@@ -67,11 +67,7 @@ OPCODE(RETURN_BLK, B)        /* return R[a] (in-block return) */
 OPCODE(BREAK,      B)        /* break R[a] */
 OPCODE(BLKPUSH,    BS)       /* R[a] = block (16=m5:r1:m5:d1:lv4) */
 OPCODE(ADD,        B)        /* R[a] = R[a]+R[a+1] */
-OPCODE(ADDI,       BB)       /* R[a] = R[a]+mrb_int(b) */
 OPCODE(SUB,        B)        /* R[a] = R[a]-R[a+1] */
-OPCODE(SUBI,       BB)       /* R[a] = R[a]-mrb_int(b) */
-OPCODE(ADDILV,     BBB)      /* R[a] = R[a]+mrb_int(c); R[b],R[b+1] for method call */
-OPCODE(SUBILV,     BBB)      /* R[a] = R[a]-mrb_int(c); R[b],R[b+1] for method call */
 OPCODE(MUL,        B)        /* R[a] = R[a]*R[a+1] */
 OPCODE(DIV,        B)        /* R[a] = R[a]/R[a+1] */
 OPCODE(EQ,         B)        /* R[a] = R[a]==R[a+1] */
@@ -103,7 +99,6 @@ OPCODE(MODULE,     BB)       /* R[a] = newmodule(R[a],Syms[b]) */
 OPCODE(EXEC,       BB)       /* R[a] = blockexec(R[a],Irep[b]) */
 OPCODE(DEF,        BB)       /* R[a].newmethod(Syms[b],R[a+1]); R[a] = Syms[b] */
 OPCODE(TDEF,       BBB)      /* target_class.newmethod(Syms[b],Irep[c]); R[a] = Syms[b] */
-OPCODE(SDEF,       BBB)      /* R[a].singleton_class.newmethod(Syms[b],Irep[c]); R[a] = Syms[b] */
 OPCODE(ALIAS,      BB)       /* alias_method(target_class,Syms[a],Syms[b]) */
 OPCODE(UNDEF,      B)        /* undef_method(target_class,Syms[a]) */
 OPCODE(SCLASS,     B)        /* R[a] = R[a].singleton_class */

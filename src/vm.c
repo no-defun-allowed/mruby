@@ -2962,103 +2962,6 @@ RETRY_TRY_BLOCK:
       NEXT;
     }
 
-#define OP_MATHI(op_name) do {                                              \
-  /* need to check if op is overridden */                                   \
-  if (mrb_likely(mrb_integer_p(regs[a]))) {                                 \
-    mrb_int x = mrb_integer(regs[a]), y = (mrb_int)b, z;                    \
-    if (mrb_int_##op_name##_overflow(x, y, &z)) {                           \
-      OP_MATH_OVERFLOW_INT(op_name,x,y);                                    \
-    }                                                                       \
-    else                                                                    \
-      SET_INT_VALUE(mrb,regs[a], z);                                        \
-  }                                                                         \
-  else switch (mrb_type(regs[a])) {                                         \
-    OP_MATHI_CASE_FLOAT(op_name);                                           \
-    default:                                                                \
-      SET_INT_VALUE(mrb,regs[a+1], b);                                      \
-      mid = MRB_OPSYM(op_name);                                             \
-      goto L_SEND_SYM;                                                      \
-  }                                                                         \
-} while(0);                                                                 \
-  NEXT;
-#define OP_MATHI_CASE_INTEGER(op_name)                                      \
-  case MRB_TT_INTEGER:                                                      \
-    {                                                                       \
-      mrb_int x = mrb_integer(regs[a]), y = (mrb_int)b, z;                  \
-      if (mrb_int_##op_name##_overflow(x, y, &z)) {                         \
-        OP_MATH_OVERFLOW_INT(op_name,x,y);                                  \
-      }                                                                     \
-      else                                                                  \
-        SET_INT_VALUE(mrb,regs[a], z);                                      \
-    }                                                                       \
-    break
-#ifdef MRB_NO_FLOAT
-#define OP_MATHI_CASE_FLOAT(op_name) (void)0
-#else
-#define OP_MATHI_CASE_FLOAT(op_name)                                        \
-  case MRB_TT_FLOAT:                                                        \
-    {                                                                       \
-      mrb_float z = mrb_float(regs[a]) OP_MATH_OP_##op_name b;              \
-      SET_FLOAT_VALUE(mrb, regs[a], z);                                     \
-    }                                                                       \
-    break
-#endif
-
-    CASE(OP_ADDI, BB) {
-      OP_MATHI(add);
-    }
-
-    CASE(OP_SUBI, BB) {
-      OP_MATHI(sub);
-    }
-
-#ifdef MRB_NO_FLOAT
-#define OP_MATHILV_CASE_FLOAT(op_name) (void)0
-#else
-#define OP_MATHILV_CASE_FLOAT(op_name)                                      \
-  case MRB_TT_FLOAT:                                                        \
-    {                                                                       \
-      mrb_float z = mrb_float(regs[a]) OP_MATH_OP_##op_name c;              \
-      SET_FLOAT_VALUE(mrb, regs[a], z);                                     \
-    }                                                                       \
-    break
-#endif
-#define OP_MATHILV(op_name)                                                 \
-  /* a=local, b=working space, c=immediate */                               \
-  switch (mrb_type(regs[a])) {                                              \
-    case MRB_TT_INTEGER:                                                    \
-      {                                                                     \
-        mrb_int x = mrb_integer(regs[a]), y = (mrb_int)c, z;                \
-        if (mrb_int_##op_name##_overflow(x, y, &z)) {                       \
-          OP_MATH_OVERFLOW_INT(op_name,x,y);                                \
-        }                                                                   \
-        else {                                                              \
-          SET_INT_VALUE(mrb,regs[a], z);                                    \
-        }                                                                   \
-      }                                                                     \
-      break;                                                                \
-    OP_MATHILV_CASE_FLOAT(op_name);                                         \
-    default:                                                                \
-      {                                                                     \
-        mrb_value arg = mrb_int_value(mrb, c);                              \
-        mrb_sym mid = MRB_OPSYM(op_name);                                   \
-        mrb_value v = mrb_funcall_argv(mrb, regs[a], mid, 1, &arg);         \
-        ci = mrb->c->ci;                                                    \
-        regs[a] = v;                                                        \
-        mrb_gc_arena_restore(mrb, ai);                                      \
-      }                                                                     \
-      break;                                                                \
-  }                                                                         \
-  NEXT
-
-    CASE(OP_ADDILV, BBB) {
-      OP_MATHILV(add);
-    }
-
-    CASE(OP_SUBILV, BBB) {
-      OP_MATHILV(sub);
-    }
-
 #define OP_CMP_BODY(op,v1,v2) (v1(regs[a]) op v2(regs[a+1]))
 
 #ifdef MRB_NO_FLOAT
@@ -3431,23 +3334,6 @@ RETRY_TRY_BLOCK:
 
       if (mrb_unlikely(!tc)) goto L_RAISE;
       p = mrb_proc_new(mrb, irep->reps[c]);
-      mid = irep->syms[b];
-      p->flags |= MRB_PROC_SCOPE | MRB_PROC_STRICT;
-      MRB_METHOD_FROM_PROC(m, p);
-      MRB_METHOD_SET_VISIBILITY(m, MRB_METHOD_VDEFAULT_FL);
-      mrb_define_method_raw(mrb, tc, mid, m);
-      mrb_method_added(mrb, tc, mid);
-      ci = mrb->c->ci;
-      mrb_gc_arena_restore(mrb, ai);
-      regs[a] = mrb_symbol_value(mid);
-      NEXT;
-    }
-
-    CASE(OP_SDEF, BBB) {
-      struct RClass *tc = mrb_class_ptr(mrb_singleton_class(mrb, regs[a]));
-      struct RProc *p = mrb_proc_new(mrb, irep->reps[c]);
-      mrb_method_t m;
-
       mid = irep->syms[b];
       p->flags |= MRB_PROC_SCOPE | MRB_PROC_STRICT;
       MRB_METHOD_FROM_PROC(m, p);

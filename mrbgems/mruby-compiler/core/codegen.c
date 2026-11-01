@@ -469,25 +469,6 @@ genop_2S(codegen_scope *s, mrb_code i, uint16_t a, uint16_t b)
 }
 
 /*
- * Generates an opcode `i` with a 16-bit operand `a` and a 32-bit operand `b`.
- * Operand `a` is emitted using `genop_1` (handling `OP_EXT2`).
- * Operand `b` is emitted as two 2-byte shorts (high word then low word).
- * Updates `s->lastpc` (via `genop_1`).
- *
- * @param s The current code generation scope.
- * @param i The opcode to generate.
- * @param a The first 16-bit operand.
- * @param b The 32-bit operand (emitted as two shorts).
- */
-static void
-genop_2SS(codegen_scope *s, mrb_code i, uint16_t a, uint32_t b)
-{
-  genop_1(s, i, a);
-  gen_S(s, b>>16);
-  gen_S(s, b&0xffff);
-}
-
-/*
  * Generates an opcode `i` followed by a 3-byte "wide" operand `a`.
  * The 3-byte operand is emitted as three separate bytes (a1, a2, a3).
  * Updates `s->lastpc`.
@@ -856,8 +837,6 @@ static void gen_int(codegen_scope *s, uint16_t dst, mrb_int i);
  *   symbol, string, etc.) into `src`, and `src` is a temporary register,
  *   this function can rewind the program counter and generate the load operation
  *   directly into `dst`, effectively eliminating the `OP_MOVE`.
- * - It can also perform constant folding for `OP_ADDI`/`OP_SUBI` if a sequence of
- *   `LOADI`, `MOVE`, `ADDI`/`SUBI` can be resolved at compile time.
  *
  * The `nopeep` parameter, if true, disables these peephole optimizations, forcing
  * the generation of a direct `OP_MOVE` instruction.
@@ -938,31 +917,6 @@ gen_move(codegen_scope *s, uint16_t dst, uint16_t src, int nopeep)
       rewind_pc(s);
       genop_3(s, data.insn, dst, data.b, data.c);
       return;
-    case OP_ADDI: case OP_SUBI:
-      if (addr_pc(s, data.addr) == s->lastlabel || data.a != src || data.a < s->nlocals) break;
-      else {
-        struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
-        if (data0.insn != OP_MOVE || data0.a != data.a || data0.b != dst) break;
-        if (addr_pc(s, data0.addr) != s->lastlabel) {
-          /* constant folding */
-          struct mrb_insn_data data1 = mrb_decode_insn(mrb_prev_pc(s, data0.addr));
-          mrb_int n;
-          if (data1.a == dst && get_int_operand(s, &data1, &n)) {
-            if ((data.insn == OP_ADDI && !mrb_int_add_overflow(n, data.b, &n)) ||
-                (data.insn == OP_SUBI && !mrb_int_sub_overflow(n, data.b, &n))) {
-              s->pc = addr_pc(s, data1.addr);
-              gen_int(s, dst, n);
-              return;
-            }
-          }
-        }
-        /* ADDILV/SUBILV fusion: MOVE temp local; ADDI temp imm; MOVE local temp */
-        /* -> ADDILV local temp imm (temp is working space for method fallback) */
-        s->pc = addr_pc(s, data0.addr);
-        genop_3(s, data.insn == OP_ADDI ? OP_ADDILV : OP_SUBILV, dst, data.a, data.b);
-        return;
-      }
-      break;
     default:
       break;
     }
@@ -1330,11 +1284,6 @@ merge_op_string(codegen_scope *s, uint16_t dst, uint16_t b1, uint16_t b2, const 
  * 1. String Concatenation: If `op` is `OP_ADD` and the two preceding instructions
  *    were `OP_STRING` (loading string literals), it calls `merge_op_string`
  *    to attempt compile-time concatenation of these literals.
- * 2. Immediate Operations: If the last instruction loaded an integer literal (`n`)
- *    and the instruction before that loaded another integer (`n0`), but `n0` is not
- *    suitable for further folding (e.g., it's at a label, or the instruction
- *    before it isn't an integer load), it attempts to convert the operation to
- *    `OP_ADDI` or `OP_SUBI` if `n` fits within an 8-bit signed integer.
  * 3. Constant Folding: If both the last two instructions loaded integer literals
  *    (`n0` and `n`), it performs the addition or subtraction at compile time.
  *    The program counter is rewound to the location of the first literal load,
@@ -1372,22 +1321,7 @@ gen_addsub(codegen_scope *s, uint8_t op, uint16_t dst)
     }
     struct mrb_insn_data data0 = mrb_decode_insn(mrb_prev_pc(s, data.addr));
     mrb_int n0;
-    if (addr_pc(s, data.addr) == s->lastlabel || !get_int_operand(s, &data0, &n0)) {
-      /* OP_ADDI/OP_SUBI takes upto 8bits */
-      if (n > UINT8_MAX || n < -UINT8_MAX) goto normal;
-      rewind_pc(s);
-      if (n == 0) return;
-      if (n > 0) {
-        if (op == OP_ADD) genop_2(s, OP_ADDI, dst, (uint16_t)n);
-        else genop_2(s, OP_SUBI, dst, (uint16_t)n);
-      }
-      else {                    /* n < 0 */
-        n = -n;
-        if (op == OP_ADD) genop_2(s, OP_SUBI, dst, (uint16_t)n);
-        else genop_2(s, OP_ADDI, dst, (uint16_t)n);
-      }
-      return;
-    }
+    if (!get_int_operand(s, &data0, &n0)) goto normal;
     if (op == OP_ADD) {
       if (mrb_int_add_overflow(n0, n, &n)) goto normal;
     }
@@ -6397,18 +6331,12 @@ codegen_sdef(codegen_scope *s, const node *varnode, int val)
 
   codegen(s, recv, VAL);
   pop();
-  if (idx <= 0xff) {
-    /* SDEF fusion: SCLASS + METHOD + DEF -> SDEF */
-    genop_3(s, OP_SDEF, cursp(), sym, idx);
-  }
-  else {
-    genop_1(s, OP_SCLASS, cursp());
-    push();
-    genop_2(s, OP_METHOD, cursp(), idx);
-    push(); pop();
-    pop();
-    genop_2(s, OP_DEF, cursp(), sym);
-  }
+  genop_1(s, OP_SCLASS, cursp());
+  push();
+  genop_2(s, OP_METHOD, cursp(), idx);
+  push(); pop();
+  pop();
+  genop_2(s, OP_DEF, cursp(), sym);
   if (val) push();
 }
 
