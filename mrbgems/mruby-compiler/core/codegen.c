@@ -503,6 +503,28 @@ no_optimize(codegen_scope *s)
   return FALSE;
 }
 
+/* instructions -> format ID */
+static uint8_t mrb_insn_format[] = {
+#define OPCODE(i, x) x,
+#define Z 1
+#define B 2
+#define BB 3
+#define BBB 4
+#define BS 5
+#define S 6
+#define W 7
+#define NN 8
+#include <mruby/ops.h>
+#undef Z
+#undef B
+#undef BB
+#undef BBB
+#undef BS
+#undef S
+#undef W
+#undef NN
+};
+
 /*
  * Decodes a mruby bytecode instruction starting at the given program counter `pc`.
  *
@@ -526,32 +548,32 @@ mrb_decode_insn(const mrb_code *pc)
   uint16_t a = 0;
   uint16_t b = 0;
   uint16_t c = 0;
-
-  switch (insn) {
-#define FETCH_Z() /* empty */
-#define OPCODE(i,x) case OP_ ## i: FETCH_ ## x (); break;
-#include <mruby/ops.h>
-#undef OPCODE
-  }
   switch (insn) {
   case OP_EXT1:
     insn = READ_B();
-    switch (insn) {
-#define OPCODE(i,x) case OP_ ## i: FETCH_ ## x ## _1 (); break;
-#include <mruby/ops.h>
-#undef OPCODE
+    switch (mrb_insn_format[insn]) {
+    case 0: mrb_assert(false); break; /* bogus opcode */
+#define CASE(n, format) case n: FETCH_ ## format ## _1(); break
+      CASE(1, Z); CASE(2, B); CASE(3, BB); CASE(4, BBB); CASE(5, BS); CASE(6, S); CASE(7, W); CASE(8, NN);
+#undef CASE
     }
     break;
   case OP_EXT2:
     insn = READ_B();
-    switch (insn) {
-#define OPCODE(i,x) case OP_ ## i: FETCH_ ## x ## _2 (); break;
-#include <mruby/ops.h>
-#undef OPCODE
+    switch (mrb_insn_format[insn]) {
+    case 0: mrb_assert(false); break; /* bogus opcode */
+#define CASE(n, format) case n: FETCH_ ## format ## _2(); break
+      CASE(1, Z); CASE(2, B); CASE(3, BB); CASE(4, BBB); CASE(5, BS); CASE(6, S); CASE(7, W); CASE(8, NN);
+#undef CASE
     }
     break;
   default:
-    break;
+    switch (mrb_insn_format[insn]) {
+    case 0: mrb_assert(false); break; /* bogus opcode */
+#define CASE(n, format) case n: FETCH_ ## format(); break
+      CASE(1, Z); CASE(2, B); CASE(3, BB); CASE(4, BBB); CASE(5, BS); CASE(6, S); CASE(7, W); CASE(8, NN);
+#undef CASE
+    }
   }
   data.insn = insn;
   data.a = a;
@@ -560,46 +582,27 @@ mrb_decode_insn(const mrb_code *pc)
   return data;
 }
 
-#undef OPCODE
-#define Z 1
-#define S 3
-#define W 4
-#define OPCODE(_,x) x,
-/* instruction sizes */
-static uint8_t mrb_insn_size[] = {
-#define B 2
-#define NN 2
-#define BB 3
-#define BBB 4
-#define BS 4
-#include <mruby/ops.h>
-#undef NN
-};
-/* EXT1 instruction sizes */
-static uint8_t mrb_insn_size1[] = {
-#define NN 3
-#include <mruby/ops.h>
-#undef B
-#undef NN
-#undef BB
-#undef BBB
-#undef BS
-};
-/* EXT2 instruction sizes */
-#define B 3
-#define NN 5
-#define BB 5
-#define BBB 6
-#define BS 5
-static uint8_t mrb_insn_size2[] = {
-#include <mruby/ops.h>
-};
-#undef B
-#undef NN
-#undef BB
-#undef BBB
-#undef BS
-#undef OPCODE
+/* format -> instruction size */
+static uint8_t mrb_format_size[]      = { 0, 1, 2, 3, 4, 4, 3, 4, 2 };
+static uint8_t mrb_format_size_ext1[] = { 0, 1, 2, 3, 4, 4, 3, 4, 3 };
+static uint8_t mrb_format_size_ext2[] = { 0, 1, 3, 5, 6, 5, 3, 4, 2 };
+
+static const unsigned int instruction_size(const mrb_code *pc) {
+  unsigned int ret;
+  switch (pc[0]) {
+  case OP_EXT1:
+    ret = mrb_format_size_ext1[mrb_insn_format[pc[1]]] + 1;
+    break;
+  case OP_EXT2:
+    ret = mrb_format_size_ext2[mrb_insn_format[pc[1]]] + 1;
+    break;
+  default:
+    ret = mrb_format_size[mrb_insn_format[pc[0]]];
+    break;
+  }
+  mrb_assert(ret > 0);
+  return ret;
+}
 
 /*
  * Finds the program counter (PC) of the instruction immediately preceding
@@ -623,17 +626,7 @@ mrb_prev_pc(codegen_scope *s, const mrb_code *pc)
   mrb_assert(pc < s->iseq + s->icapa);
   while (i<pc) {
     prev_pc = i;
-    switch (i[0]) {
-    case OP_EXT1:
-      i += mrb_insn_size1[i[1]] + 1;
-      break;
-    case OP_EXT2:
-      i += mrb_insn_size2[i[1]] + 1;
-      break;
-    default:
-      i += mrb_insn_size[i[0]];
-      break;
-    }
+    i += instruction_size(i);
   }
   return prev_pc;
 }
@@ -1228,17 +1221,7 @@ merge_op_string(codegen_scope *s, uint16_t dst, uint16_t b1, uint16_t b2, const 
       if (data.b == b1) used |= 1;
       if (data.b == b2) used |= 2;
     }
-    switch (i[0]) {
-    case OP_EXT1:
-      i += mrb_insn_size1[i[1]] + 1;
-      break;
-    case OP_EXT2:
-      i += mrb_insn_size2[i[1]] + 1;
-      break;
-    default:
-      i += mrb_insn_size[i[0]];
-      break;
-    }
+    i += instruction_size(i);
   }
 
   mrb_irep_pool *p1 = &s->pool[b1];
