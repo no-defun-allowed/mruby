@@ -1402,11 +1402,15 @@ MRB_API void mrb_gc_mark(mrb_state*,struct RBasic*);
 #define mrb_gc_mark_value(mrb,val) do {\
   if (!mrb_immediate_p(val)) mrb_gc_mark((mrb), mrb_basic_ptr(val)); \
 } while (0)
-MRB_API void mrb_field_write_barrier(mrb_state*, struct RBasic*, struct RBasic*);
+static inline void mrb_field_write_barrier(mrb_state* mrb, struct RBasic* obj, struct RBasic* value) {
+  (void)mrb; (void)obj; (void)value;
+}
 #define mrb_field_write_barrier_value(mrb, obj, val) do{\
   if (!mrb_immediate_p(val)) mrb_field_write_barrier((mrb), (obj), mrb_basic_ptr(val)); \
 } while (0)
-MRB_API void mrb_write_barrier(mrb_state *, struct RBasic*);
+static inline void mrb_write_barrier(mrb_state *mrb, struct RBasic* obj) {
+  (void)mrb; (void)obj;
+}
 
 MRB_API mrb_value mrb_type_convert(mrb_state *mrb, mrb_value val, enum mrb_vtype type, mrb_sym method);
 #define mrb_convert_type(mrb, val, type, tname, method) mrb_type_convert(mrb, val, type, mrb_intern_lit(mrb, method))

@@ -33,9 +33,9 @@ void mrb_task_mark_all(mrb_state *mrb);
 #endif
 
 /*
-  = Tri-color Incremental Garbage Collection
+  = Tri-color Garbage Collection
 
-  mruby's GC is Tri-color Incremental GC with Mark & Sweep.
+  mruby's GC is Tri-color GC with Mark & Sweep.
   Algorithm details are omitted.
   Instead, the implementation part is described below.
 
@@ -76,22 +76,8 @@ void mrb_task_mark_all(mrb_state *mrb);
   List of Adjustment API:
 
     * gc_interval_ratio_set
-    * gc_step_ratio_set
 
   For details, see the comments for each function.
-
-  == Write Barrier
-
-  mruby implementer and C extension library writer must insert a write
-  barrier when updating a reference from a field of an object.
-  When updating a reference from a field of object A to object B,
-  two different types of write barrier are available:
-
-    * mrb_field_write_barrier - target B object for a mark.
-    * mrb_write_barrier       - target A object for a mark.
-
-  For details, see the comments for each function.
-
 */
 
 typedef struct RVALUE RVALUE;
@@ -164,8 +150,6 @@ typedef struct mrb_heap_region {
   uint16_t page_count;           /* pages carved from region */
 } mrb_heap_region;
 
-#define GC_STEP_SIZE 1024
-
 /* white: 001 or 010, black: 100, gray: 000, red:111 */
 #define GC_GRAY 0
 #define GC_WHITE_A 1
@@ -201,7 +185,7 @@ mrb_realloc_simple(mrb_state *mrb, void *p,  size_t len)
   }
 #endif
   p2 = mrb_basic_alloc_func(p, len);
-  if (!p2 && len > 0 && mrb->gc.heaps && mrb->gc.state != MRB_GC_STATE_SWEEP) {
+  if (!p2 && len > 0 && mrb->gc.heaps) {
     mrb_full_gc(mrb);
     p2 = mrb_basic_alloc_func(p, len);
   }
@@ -379,7 +363,6 @@ mrb_gc_add_region(mrb_state *mrb, void *start, size_t size)
 }
 
 #define DEFAULT_GC_INTERVAL_RATIO 200
-#define DEFAULT_GC_STEP_RATIO 200
 
 void
 mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
@@ -395,7 +378,6 @@ mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
   gc->regions = NULL;
   add_heap(mrb, gc);
   gc->interval_ratio = DEFAULT_GC_INTERVAL_RATIO;
-  gc->step_ratio = DEFAULT_GC_STEP_RATIO;
 }
 
 static void obj_free(mrb_state *mrb, struct RBasic *obj, mrb_bool end);
@@ -561,7 +543,7 @@ mrb_obj_alloc(mrb_state *mrb, enum mrb_vtype ttype, struct RClass *cls)
   mrb_full_gc(mrb);
 #endif
   if (gc->threshold < gc->live) {
-    mrb_incremental_gc(mrb);
+    mrb_full_gc(mrb);
   }
   gc_arena_keep(mrb, gc);
   if (gc->free_heaps == NULL) {
@@ -1064,15 +1046,13 @@ gc_mark_gray_list(mrb_state *mrb, mrb_gc *gc) {
   }
 }
 
-static size_t
-incremental_marking_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
+static void
+marking_phase(mrb_state *mrb, mrb_gc *gc)
 {
-  size_t tried_marks = 0;
-
-  while (tried_marks < limit) {
+  for (;;) {
     if (gc->gray_stack_top > 0) {
       struct RBasic *obj = gc->gray_stack[--gc->gray_stack_top];
-      tried_marks += gc_mark_children(mrb, gc, obj);
+      gc_mark_children(mrb, gc, obj);
     }
     else if (gc->gray_overflow) {
       gc_gray_rescan(mrb, gc);
@@ -1082,8 +1062,6 @@ incremental_marking_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
       break;
     }
   }
-
-  return tried_marks;
 }
 
 static void
@@ -1127,22 +1105,14 @@ final_marking_phase(mrb_state *mrb, mrb_gc *gc)
 }
 
 static void
-prepare_incremental_sweep(mrb_state *mrb, mrb_gc *gc)
+sweep_phase(mrb_state *mrb, mrb_gc *gc)
 {
-  //  mrb_assert(gc->gray_stack_top == 0);
-  gc->state = MRB_GC_STATE_SWEEP;
   gc->sweeps = NULL;
   gc->live_after_mark = gc->live;
-}
-
-static size_t
-incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
-{
   mrb_heap_page *prev = gc->sweeps;
   mrb_heap_page *page = prev ? prev->next : gc->heaps;
-  size_t tried_sweep = 0;
 
-  while (page && (tried_sweep < limit)) {
+  while (page) {
     RVALUE *p = page->objects;
     RVALUE *e = p + MRB_HEAP_PAGE_SIZE;
     size_t freed = 0;
@@ -1184,7 +1154,6 @@ incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
       prev = page;
       page = page->next;
     }
-    tried_sweep += MRB_HEAP_PAGE_SIZE;
     gc->live -= freed;
     gc->live_after_mark -= freed;
   }
@@ -1198,81 +1167,15 @@ incremental_sweep_phase(mrb_state *mrb, mrb_gc *gc, size_t limit)
       gc->free_heaps = p;
     }
   }
-
-  return tried_sweep;
 }
 
-static size_t
-incremental_gc(mrb_state *mrb, mrb_gc *gc, size_t limit)
+static void run_gc(mrb_state *mrb, mrb_gc *gc)
 {
-  switch (gc->state) {
-  case MRB_GC_STATE_ROOT:
-    root_scan_phase(mrb, gc);
-    gc->state = MRB_GC_STATE_MARK;
-    flip_white_part(gc);
-    return 0;
-  case MRB_GC_STATE_MARK:
-    if (gc->gray_stack_top > 0 || gc->gray_overflow) {
-      return incremental_marking_phase(mrb, gc, limit);
-    }
-    else {
-      final_marking_phase(mrb, gc);
-      prepare_incremental_sweep(mrb, gc);
-      return 0;
-    }
-  case MRB_GC_STATE_SWEEP: {
-     size_t tried_sweep = 0;
-     tried_sweep = incremental_sweep_phase(mrb, gc, limit);
-     if (tried_sweep == 0)
-       gc->state = MRB_GC_STATE_ROOT;
-     return tried_sweep;
-  }
-  default:
-    /* unknown state */
-    mrb_assert(0);
-    return 0;
-  }
-}
-
-static void
-incremental_gc_finish(mrb_state *mrb, mrb_gc *gc)
-{
-  do {
-    incremental_gc(mrb, gc, SIZE_MAX);
-  } while (gc->state != MRB_GC_STATE_ROOT);
-}
-
-static void
-incremental_gc_step(mrb_state *mrb, mrb_gc *gc)
-{
-  size_t limit = 0, result = 0;
-  limit = (GC_STEP_SIZE/100) * gc->step_ratio;
-  while (result < limit) {
-    result += incremental_gc(mrb, gc, limit);
-    if (gc->state == MRB_GC_STATE_ROOT)
-      break;
-  }
-
-  gc->threshold = gc->live + GC_STEP_SIZE;
-}
-
-MRB_API void
-mrb_incremental_gc(mrb_state *mrb)
-{
-  mrb_gc *gc = &mrb->gc;
-
-  if (gc->disabled || gc->iterating) return;
-
-  /* XXX: add non-incremental mode which calls incremental_gc_finish immediately */
-  incremental_gc_step(mrb, gc);
-
-  if (gc->state == MRB_GC_STATE_ROOT) {
-    mrb_assert(gc->live >= gc->live_after_mark);
-    gc->threshold = (gc->live_after_mark/100) * gc->interval_ratio;
-    if (gc->threshold < GC_STEP_SIZE) {
-      gc->threshold = GC_STEP_SIZE;
-    }
-  }
+  root_scan_phase(mrb, gc);
+  flip_white_part(gc);
+  marking_phase(mrb, gc);
+  final_marking_phase(mrb, gc);
+  sweep_phase(mrb, gc);
 }
 
 /* Perform a full gc cycle */
@@ -1283,13 +1186,7 @@ mrb_full_gc(mrb_state *mrb)
 
   if (!mrb->c) return;
   if (gc->disabled || gc->iterating) return;
-
-  else if (gc->state != MRB_GC_STATE_ROOT) {
-    /* finish half baked GC cycle */
-    incremental_gc_finish(mrb, gc);
-  }
-
-  incremental_gc_finish(mrb, gc);
+  run_gc(mrb, gc);
   gc->threshold = (gc->live_after_mark/100) * gc->interval_ratio;
 
 #ifdef MRB_USE_MALLOC_TRIM
@@ -1301,60 +1198,6 @@ MRB_API void
 mrb_garbage_collect(mrb_state *mrb)
 {
   mrb_full_gc(mrb);
-}
-
-/*
- * Field write barrier
- *   Paint obj(Black) -> value(White) to obj(Black) -> value(Gray).
- */
-
-MRB_API void
-mrb_field_write_barrier(mrb_state *mrb, struct RBasic *obj, struct RBasic *value)
-{
-  mrb_gc *gc = &mrb->gc;
-
-  if (!value) return;
-  if (!is_black(obj)) return;
-  if (!is_white(value)) return;
-  if (is_red(value)) return;
-
-  mrb_assert(gc->state == MRB_GC_STATE_MARK || (!is_dead(gc, value) && !is_dead(gc, obj)));
-  mrb_assert(gc->state != MRB_GC_STATE_ROOT);
-
-  if (gc->state == MRB_GC_STATE_MARK) {
-    add_gray_list(gc, value);
-  }
-  else {
-    mrb_assert(gc->state == MRB_GC_STATE_SWEEP);
-    paint_partial_white(gc, obj); /* for never write barriers */
-  }
-}
-
-/*
- * Write barrier
- *   Paint obj(Black) to obj(Gray).
- *
- *   The object that is painted gray will be traversed atomically in final
- *   mark phase. So you use this write barrier if it's frequency written spot.
- *   e.g. Set element on Array.
- */
-
-MRB_API void
-mrb_write_barrier(mrb_state *mrb, struct RBasic *obj)
-{
-  mrb_gc *gc = &mrb->gc;
-
-  if (!is_black(obj)) return;
-
-  mrb_assert(!is_dead(gc, obj));
-  mrb_assert(gc->state != MRB_GC_STATE_ROOT);
-  paint_gray(obj);
-  if (gc->gray_stack_top < MRB_GRAY_STACK_SIZE) {
-    gc->gray_stack[gc->gray_stack_top++] = obj;
-  }
-  else {
-    gc->gray_overflow = TRUE;
-  }
 }
 
 /*
@@ -1446,40 +1289,8 @@ gc_interval_ratio_set(mrb_state *mrb, mrb_value obj)
   mrb_int ratio;
 
   mrb_get_args(mrb, "i", &ratio);
+  if (ratio <= 100) mrb_raise(mrb, E_ARGUMENT_ERROR, "ratio should be greater than 100");
   mrb->gc.interval_ratio = (int)ratio;
-  return mrb_nil_value();
-}
-
-/*
- *  call-seq:
- *     GC.step_ratio    -> int
- *
- *  Returns step span ratio of Incremental GC. Default value is 200(%).
- *
- */
-
-static mrb_value
-gc_step_ratio_get(mrb_state *mrb, mrb_value obj)
-{
-  return mrb_int_value(mrb, mrb->gc.step_ratio);
-}
-
-/*
- *  call-seq:
- *     GC.step_ratio = int   -> nil
- *
- *  Updates step span ratio of Incremental GC. Default value is 200(%).
- *  1 step of incrementalGC becomes long if a rate is big.
- *
- */
-
-static mrb_value
-gc_step_ratio_set(mrb_state *mrb, mrb_value obj)
-{
-  mrb_int ratio;
-
-  mrb_get_args(mrb, "i", &ratio);
-  mrb->gc.step_ratio = (int)ratio;
   return mrb_nil_value();
 }
 
@@ -1555,6 +1366,4 @@ mrb_init_gc(mrb_state *mrb)
   mrb_define_class_method_id(mrb, gc, MRB_SYM(disable), gc_disable, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, gc, MRB_SYM(interval_ratio), gc_interval_ratio_get, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, gc, MRB_SYM_E(interval_ratio), gc_interval_ratio_set, MRB_ARGS_REQ(1));
-  mrb_define_class_method_id(mrb, gc, MRB_SYM(step_ratio), gc_step_ratio_get, MRB_ARGS_NONE());
-  mrb_define_class_method_id(mrb, gc, MRB_SYM_E(step_ratio), gc_step_ratio_set, MRB_ARGS_REQ(1));
 }

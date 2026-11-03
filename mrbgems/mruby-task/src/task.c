@@ -482,11 +482,6 @@ mrb_task_run(mrb_state *mrb)
     if (t->status == MRB_TASK_STATUS_READY) {
       task_change_state(mrb, t, MRB_TASK_STATUS_READY);
     }
-
-    /* Run incremental GC if active */
-    if (mrb->gc.state != MRB_GC_STATE_ROOT) {
-      mrb_incremental_gc(mrb);
-    }
   }
 
   return mrb_nil_value();
