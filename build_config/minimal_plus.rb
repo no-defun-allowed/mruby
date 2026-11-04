@@ -1,4 +1,4 @@
-MRuby::CrossBuild.new('minimal_plus') do |conf|
+MRuby::Build.new do |conf|
   conf.toolchain :gcc
   conf.cc do |cc|
     # Remove some stuff we don't need
