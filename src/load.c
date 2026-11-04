@@ -249,6 +249,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, const uint8_t *end, size_
         }
         break;
       case IREP_TT_INT64:
+#ifdef MRB_INT64
         {
           if (src + sizeof(uint32_t)*2 > end) { COMPLAIN("not enough file for an int64"); return FALSE; }
           uint64_t i64 = bin_to_uint32(src);
@@ -259,6 +260,10 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, const uint8_t *end, size_
           pool[i].tt = tt;
           pool[i].u.i64 = (int64_t)i64;
         }
+#else
+        COMPLAIN("no int64 support");
+        return FALSE;
+#endif
         break;
 
       case IREP_TT_BIGINT:

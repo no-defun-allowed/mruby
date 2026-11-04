@@ -4,6 +4,8 @@ MRuby::CrossBuild.new('minimal_plus') do |conf|
     # Remove some stuff we don't need
     cc.flags = "-Os -fno-exceptions -fno-asynchronous-unwind-tables"
     cc.defines << 'MRB_SMALLER'
+    # Make sure we can cross-compile for Underworld
+    cc.defines << 'MRB_INT32'
   end
 
   conf.gem 'mrbgems/mruby-bin-mirb/'

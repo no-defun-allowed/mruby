@@ -1753,9 +1753,6 @@ RETRY_TRY_BLOCK:
 #ifdef MRB_INT64
         regs[a] = mrb_int_value(mrb, (mrb_int)irep->pool[b].u.i64);
         break;
-#elif defined(MRB_USE_BIGINT)
-        regs[a] = mrb_bint_new_int64(mrb, irep->pool[b].u.i64);
-        break;
 #else
 #ifdef MRB_64BIT
         if (INT32_MIN <= irep->pool[b].u.i64 && irep->pool[b].u.i64 <= INT32_MAX) {
