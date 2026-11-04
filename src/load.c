@@ -20,6 +20,8 @@
 # error size_t must be at least 32 bits wide
 #endif
 
+#define COMPLAIN(str) fprintf(stderr, str "\n");
+
 #define FLAG_SRC_MALLOC 1
 #define FLAG_SRC_STATIC 0
 
@@ -234,7 +236,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, const uint8_t *end, size_
       switch (tt) { /* pool data */
       case IREP_TT_INT32:
         {
-          if (src + sizeof(uint32_t) > end) return FALSE;
+          if (src + sizeof(uint32_t) > end) { COMPLAIN("not enough file for an int32"); return FALSE; }
           mrb_int v = (int32_t)bin_to_uint32(src);
           src += sizeof(uint32_t);
 #ifdef MRB_64BIT
@@ -247,9 +249,8 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, const uint8_t *end, size_
         }
         break;
       case IREP_TT_INT64:
-#ifdef MRB_INT64
         {
-          if (src + sizeof(uint32_t)*2 > end) return FALSE;
+          if (src + sizeof(uint32_t)*2 > end) { COMPLAIN("not enough file for an int64"); return FALSE; }
           uint64_t i64 = bin_to_uint32(src);
           src += sizeof(uint32_t);
           i64 <<= 32;
@@ -259,13 +260,10 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, const uint8_t *end, size_
           pool[i].u.i64 = (int64_t)i64;
         }
         break;
-#else
-        return FALSE;
-#endif
 
       case IREP_TT_BIGINT:
         pool_data_len = bin_to_uint8(src) + 2; /* pool data length */
-        if (src + pool_data_len > end) return FALSE;
+        if (src + pool_data_len > end) { COMPLAIN("not enough file for this bigint"); return FALSE; }
         else {
           char *p;
           pool[i].tt = IREP_TT_BIGINT;
@@ -284,6 +282,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, const uint8_t *end, size_
         src += sizeof(double);
         break;
 #else
+        COMPLAIN("no float support");
         return FALSE;           /* MRB_NO_FLOAT */
 #endif
 
@@ -306,6 +305,7 @@ read_irep_record_1(mrb_state *mrb, const uint8_t *bin, const uint8_t *end, size_
         break;
 
       default:
+        COMPLAIN("bogus constant pool type");
         /* should not happen */
         return FALSE;
       }
@@ -685,11 +685,13 @@ read_irep(mrb_state *mrb, const uint8_t *bin, size_t bufsize, uint8_t flags)
   size_t bin_size = 0;
 
   if ((mrb == NULL) || (bin == NULL)) {
+    COMPLAIN("input pointers are null");
     return NULL;
   }
 
   result = read_binary_header(bin, bufsize, &bin_size, &flags);
   if (result != MRB_DUMP_OK) {
+    COMPLAIN("couldn't find header");
     return NULL;
   }
 
@@ -701,12 +703,16 @@ read_irep(mrb_state *mrb, const uint8_t *bin, size_t bufsize, uint8_t flags)
     if (bin_size < section_size) return NULL;
     if (memcmp(section_header->section_ident, RITE_SECTION_IREP_IDENT, sizeof(section_header->section_ident)) == 0) {
       irep = read_section_irep(mrb, bin, bin_size, flags, &proc);
-      if (!irep) return NULL;
+      if (!irep) {
+        COMPLAIN("couldn't read section irep");
+        return NULL;
+      }
     }
     else if (memcmp(section_header->section_ident, RITE_SECTION_DEBUG_IDENT, sizeof(section_header->section_ident)) == 0) {
       if (!irep) return NULL;   /* corrupted data */
       result = read_section_debug(mrb, bin, bin_size, irep, flags);
       if (result < MRB_DUMP_OK) {
+        COMPLAIN("couldn't read debug");
         return NULL;
       }
     }
@@ -714,6 +720,7 @@ read_irep(mrb_state *mrb, const uint8_t *bin, size_t bufsize, uint8_t flags)
       if (!irep) return NULL;
       result = read_section_lv(mrb, bin, bin_size, irep, flags);
       if (result < MRB_DUMP_OK) {
+        COMPLAIN("couldn't read lv");
         return NULL;
       }
     }
@@ -816,6 +823,7 @@ mrb_proc_read_irep_file(mrb_state *mrb, FILE *fp)
   int result;
 
   if ((mrb == NULL) || (fp == NULL)) {
+    COMPLAIN("input pointers are null\n");
     return NULL;
   }
 
