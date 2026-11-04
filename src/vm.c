@@ -1755,7 +1755,6 @@ RETRY_TRY_BLOCK:
         break;
 #elif defined(MRB_USE_BIGINT)
         regs[a] = mrb_bint_new_int64(mrb, irep->pool[b].u.i64);
-        mrb_gc_arena_restore(mrb, ai);
         break;
 #else
 #ifdef MRB_64BIT

@@ -1089,9 +1089,9 @@ static void sweep_one_page(mrb_state *mrb, mrb_gc *gc) {
     if (is_dead(gc, &p->as.basic)) {
       if (p->as.basic.tt != MRB_TT_FREE) {
         obj_free(mrb, &p->as.basic, FALSE);
-        p->as.free.next = page->freelist;
-        page->freelist = p;
       }
+      p->as.free.next = page->freelist;
+      page->freelist = p;
     }
     else {
       paint_white(&p->as.basic);
