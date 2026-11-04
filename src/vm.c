@@ -1750,11 +1750,15 @@ RETRY_TRY_BLOCK:
         regs[a] = mrb_int_value(mrb, (mrb_int)irep->pool[b].u.i32);
         break;
       case IREP_TT_INT64:
-#if defined(MRB_INT64)
+#ifdef MRB_INT64
         regs[a] = mrb_int_value(mrb, (mrb_int)irep->pool[b].u.i64);
         break;
+#elif defined(MRB_USE_BIGINT)
+        regs[a] = mrb_bint_new_int64(mrb, irep->pool[b].u.i64);
+        mrb_gc_arena_restore(mrb, ai);
+        break;
 #else
-#if defined(MRB_64BIT)
+#ifdef MRB_64BIT
         if (INT32_MIN <= irep->pool[b].u.i64 && irep->pool[b].u.i64 <= INT32_MAX) {
           regs[a] = mrb_int_value(mrb, (mrb_int)irep->pool[b].u.i64);
           break;
