@@ -40,7 +40,7 @@ typedef enum {
 
 typedef struct mrb_gc {
   struct mrb_heap_page *pages;     /* all pages */
-  struct mrb_heap_page *free_pages;/* pages for allocation */
+  struct mrb_heap_page *current;   /* page being allocated into */
   struct mrb_heap_page *sweeps;    /* page where sweep starts */
   struct mrb_heap_region *regions;  /* contiguous heap regions */
   struct RBasic *gray_stack[MRB_GRAY_STACK_SIZE]; /* stack of gray objects */

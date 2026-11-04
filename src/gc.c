@@ -120,7 +120,7 @@ struct RVALUE {
 typedef struct mrb_heap_page {
   RVALUE *freelist;
   struct mrb_heap_page *next;
-  struct mrb_heap_page *free_next;
+  struct mrb_heap_page *prev;
   mrb_bool region:1;             /* from contiguous region, not malloc */
   RVALUE objects[MRB_HEAP_PAGE_SIZE];
 } mrb_heap_page;
@@ -275,9 +275,9 @@ static void
 link_heap_page(mrb_gc *gc, mrb_heap_page *page)
 {
   page->next = gc->pages;
+  if (page->next) page->next->prev = page;
   gc->pages = page;
-  page->free_next = gc->free_pages;
-  gc->free_pages = page;
+  gc->current = page;
 }
 
 static void
@@ -349,7 +349,6 @@ mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
 #endif
 
   gc->pages = NULL;
-  gc->free_pages = NULL;
   gc->regions = NULL;
   add_heap(mrb, gc);
   gc->interval_ratio = DEFAULT_GC_INTERVAL_RATIO;
@@ -482,6 +481,9 @@ mrb_gc_unregister(mrb_state *mrb, mrb_value obj)
   ARY_SET_LEN(a, w);
 }
 
+/* forward declaration */
+static void sweep_one_page(mrb_state*, mrb_gc*);
+
 MRB_API struct RBasic*
 mrb_obj_alloc(mrb_state *mrb, enum mrb_vtype ttype, struct RClass *cls)
 {
@@ -521,16 +523,12 @@ mrb_obj_alloc(mrb_state *mrb, enum mrb_vtype ttype, struct RClass *cls)
     mrb_full_gc(mrb);
   }
   gc_arena_keep(mrb, gc);
-  if (gc->free_pages == NULL) {
-    add_heap(mrb, gc);
-  }
+  /* Lazy sweep until we find a free object. */
+  while (gc->sweeps && !gc->current->freelist) sweep_one_page(mrb, gc);
+  if (gc->current == NULL) add_heap(mrb, gc);
 
-  RVALUE *p = gc->free_pages->freelist;
-  gc->free_pages->freelist = p->as.free.next;
-  if (gc->free_pages->freelist == NULL) {
-    gc->free_pages = gc->free_pages->free_next;
-  }
-
+  RVALUE *p = gc->current->freelist;
+  gc->current->freelist = p->as.free.next;
   gc->live++;
   gc_protect(mrb, gc, &p->as.basic);
   *p = RVALUE_zero;
@@ -1080,65 +1078,53 @@ final_marking_phase(mrb_state *mrb, mrb_gc *gc)
   gc_mark_gray_list(mrb, gc);
 }
 
-static void
-sweep_phase(mrb_state *mrb, mrb_gc *gc)
-{
-  gc->sweeps = NULL;
-  mrb_heap_page *prev = gc->sweeps;
-  mrb_heap_page *page = prev ? prev->next : gc->pages;
-
-  while (page) {
-    RVALUE *p = page->objects;
-    RVALUE *e = p + MRB_HEAP_PAGE_SIZE;
-    mrb_bool dead_page = TRUE;
-
-    for (; p < e; p++) {
-      if (is_dead(gc, &p->as.basic)) {
-        if (p->as.basic.tt != MRB_TT_FREE) {
-          obj_free(mrb, &p->as.basic, FALSE);
-          p->as.free.next = page->freelist;
-          page->freelist = p;
-        }
+static void sweep_one_page(mrb_state *mrb, mrb_gc *gc) {
+  mrb_assert(gc->sweeps);
+  mrb_heap_page *page = gc->sweeps;
+  RVALUE *p = page->objects;
+  RVALUE *e = p + MRB_HEAP_PAGE_SIZE;
+  mrb_bool dead_page = TRUE;
+  for (; p < e; p++) {
+    if (is_dead(gc, &p->as.basic)) {
+      if (p->as.basic.tt != MRB_TT_FREE) {
+        obj_free(mrb, &p->as.basic, FALSE);
+        p->as.free.next = page->freelist;
+        page->freelist = p;
       }
-      else {
-        paint_white(&p->as.basic);
-        dead_page = FALSE;
-      }
-    }
-    
-    /* free dead page */
-    if (dead_page && !page->region) {
-      mrb_heap_page *next = page->next;
-      if (prev) prev->next = next;
-      if (gc->pages == page)
-        gc->pages = page->next;
-      mrb_free(mrb, page);
-      page = next;
     }
     else {
-      prev = page;
-      page = page->next;
+      paint_white(&p->as.basic);
+      dead_page = FALSE;
     }
   }
-  gc->sweeps = prev;
-
-  /* rebuild free_heaps link */
-  gc->free_pages = NULL;
-  for (mrb_heap_page *p = gc->pages; p; p=p->next) {
-    if (p->freelist) {
-      p->free_next = gc->free_pages;
-      gc->free_pages = p;
-    }
+  gc->sweeps = page->next;
+  if (dead_page && !page->region) {
+    /* free dead page */
+    if (page->prev) page->prev->next = page->next;
+    if (page->next) page->next->prev = page->prev;
+    if (gc->pages == page) gc->pages = page->next;
+    mrb_free(mrb, page);
+  } else {
+    /* give page to the allocator */
+    gc->current = page;
   }
 }
 
-static void run_gc(mrb_state *mrb, mrb_gc *gc)
+static void
+finish_sweep(mrb_state *mrb, mrb_gc *gc)
 {
+  while (gc->sweeps) sweep_one_page(mrb, gc);
+}
+
+static void
+run_gc(mrb_state *mrb, mrb_gc *gc)
+{
+  finish_sweep(mrb, gc);
   gc->live = 0;
   root_scan_phase(mrb, gc);
   marking_phase(mrb, gc);
   final_marking_phase(mrb, gc);
-  sweep_phase(mrb, gc);
+  gc->sweeps = gc->pages;
 }
 
 /* Perform a full gc cycle */
