@@ -52,24 +52,6 @@ void mrb_task_mark_all(mrb_state *mrb);
     * Red - Static (ROM object) no need to be collected.
           - All child objects should be Red as well.
 
-  == Two White Types
-
-  There are two white color types in a flip-flop fashion: White-A and White-B,
-  which respectively represent the Current White color (the newly allocated
-  objects in the current GC cycle) and the Sweep Target White color (the
-  dead objects to be swept).
-
-  A and B will be switched just at the beginning of the next GC cycle. At
-  that time, all the dead objects have been swept, while the newly created
-  objects in the current GC cycle which finally remains White are now
-  regarded as dead objects. Instead of traversing all the White-A objects and
-  painting them as White-B, just switch the meaning of White-A and White-B as
-  this will be much cheaper.
-
-  As a result, the objects we sweep in the current GC cycle are always
-  left from the previous GC cycle. This allows us to sweep objects
-  incrementally, without the disturbance of the newly created objects.
-
   == Execution Timing
 
   GC Execution Time and Each step interval are decided by live objects count.
@@ -150,27 +132,21 @@ typedef struct mrb_heap_region {
   uint16_t page_count;           /* pages carved from region */
 } mrb_heap_region;
 
-/* white: 001 or 010, black: 100, gray: 000, red:111 */
 #define GC_GRAY 0
-#define GC_WHITE_A 1
-#define GC_WHITE_B 2
-#define GC_BLACK   4
+#define GC_WHITE 1
+#define GC_BLACK 2
 #define GC_RED MRB_GC_RED
-#define GC_WHITES (GC_WHITE_A | GC_WHITE_B)
 #define GC_COLOR_MASK 7
 mrb_static_assert(MRB_GC_RED <= GC_COLOR_MASK);
 
 #define paint_gray(o) ((o)->gc_color = GC_GRAY)
 #define paint_black(o) ((o)->gc_color = GC_BLACK)
-#define paint_white(o) ((o)->gc_color = GC_WHITES)
-#define paint_partial_white(s, o) ((o)->gc_color = (s)->current_white_part)
+#define paint_white(o) ((o)->gc_color = GC_WHITE)
 #define is_gray(o) ((o)->gc_color == GC_GRAY)
-#define is_white(o) ((o)->gc_color & GC_WHITES)
+#define is_white(o) ((o)->gc_color == GC_WHITE)
 #define is_black(o) ((o)->gc_color == GC_BLACK)
 #define is_red(o) ((o)->gc_color == GC_RED)
-#define flip_white_part(s) ((s)->current_white_part = other_white_part(s))
-#define other_white_part(s) ((s)->current_white_part ^ GC_WHITES)
-#define is_dead(s, o) (((o)->gc_color & other_white_part(s) & GC_WHITES) || (o)->tt == MRB_TT_FREE)
+#define is_dead(s, o) ((o)->gc_color == GC_WHITE)
 
 mrb_noreturn void mrb_raise_nomemory(mrb_state *mrb);
 
@@ -185,7 +161,7 @@ mrb_realloc_simple(mrb_state *mrb, void *p,  size_t len)
   }
 #endif
   p2 = mrb_basic_alloc_func(p, len);
-  if (!p2 && len > 0 && mrb->gc.heaps) {
+  if (!p2 && len > 0 && mrb->gc.pages) {
     mrb_full_gc(mrb);
     p2 = mrb_basic_alloc_func(p, len);
   }
@@ -274,7 +250,7 @@ heap_p(mrb_gc *gc, const struct RBasic *object)
     }
   }
 
-  page = gc->heaps;
+  page = gc->pages;
   while (page) {
     RVALUE *p;
 
@@ -298,10 +274,10 @@ mrb_object_dead_p(mrb_state *mrb, struct RBasic *object)
 static void
 link_heap_page(mrb_gc *gc, mrb_heap_page *page)
 {
-  page->next = gc->heaps;
-  gc->heaps = page;
-  page->free_next = gc->free_heaps;
-  gc->free_heaps = page;
+  page->next = gc->pages;
+  gc->pages = page;
+  page->free_next = gc->free_pages;
+  gc->free_pages = page;
 }
 
 static void
@@ -362,7 +338,7 @@ mrb_gc_add_region(mrb_state *mrb, void *start, size_t size)
   return page_count;
 }
 
-#define DEFAULT_GC_INTERVAL_RATIO 200
+#define DEFAULT_GC_INTERVAL_RATIO 150
 
 void
 mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
@@ -372,9 +348,8 @@ mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
   gc->arena_capa = MRB_GC_ARENA_SIZE;
 #endif
 
-  gc->current_white_part = GC_WHITE_A;
-  gc->heaps = NULL;
-  gc->free_heaps = NULL;
+  gc->pages = NULL;
+  gc->free_pages = NULL;
   gc->regions = NULL;
   add_heap(mrb, gc);
   gc->interval_ratio = DEFAULT_GC_INTERVAL_RATIO;
@@ -385,7 +360,7 @@ static void obj_free(mrb_state *mrb, struct RBasic *obj, mrb_bool end);
 static void
 free_heap(mrb_state *mrb, mrb_gc *gc)
 {
-  mrb_heap_page *page = gc->heaps;
+  mrb_heap_page *page = gc->pages;
   mrb_heap_page *tmp;
   RVALUE *p, *e;
 
@@ -546,14 +521,14 @@ mrb_obj_alloc(mrb_state *mrb, enum mrb_vtype ttype, struct RClass *cls)
     mrb_full_gc(mrb);
   }
   gc_arena_keep(mrb, gc);
-  if (gc->free_heaps == NULL) {
+  if (gc->free_pages == NULL) {
     add_heap(mrb, gc);
   }
 
-  RVALUE *p = gc->free_heaps->freelist;
-  gc->free_heaps->freelist = p->as.free.next;
-  if (gc->free_heaps->freelist == NULL) {
-    gc->free_heaps = gc->free_heaps->free_next;
+  RVALUE *p = gc->free_pages->freelist;
+  gc->free_pages->freelist = p->as.free.next;
+  if (gc->free_pages->freelist == NULL) {
+    gc->free_pages = gc->free_pages->free_next;
   }
 
   gc->live++;
@@ -564,7 +539,7 @@ mrb_obj_alloc(mrb_state *mrb, enum mrb_vtype ttype, struct RClass *cls)
   if (ttype == MRB_TT_OBJECT) {
     p->as.basic.flags |= MRB_FL_OBJ_SHAPED;
   }
-  paint_partial_white(gc, &p->as.basic);
+  paint_white(&p->as.basic);
   return &p->as.basic;
 }
 
@@ -799,6 +774,7 @@ mrb_gc_mark(mrb_state *mrb, struct RBasic *obj)
   if (!is_white(obj)) return;
   if (is_red(obj)) return;
   mrb_assert((obj)->tt != MRB_TT_FREE);
+  mrb->gc.live++;
   add_gray_list(&mrb->gc, obj);
 }
 
@@ -1015,7 +991,7 @@ root_scan_phase(mrb_state *mrb, mrb_gc *gc)
 static void
 gc_gray_rescan(mrb_state *mrb, mrb_gc *gc)
 {
-  mrb_heap_page *page = gc->heaps;
+  mrb_heap_page *page = gc->pages;
 
   gc->gray_overflow = FALSE;
   while (page) {
@@ -1108,45 +1084,34 @@ static void
 sweep_phase(mrb_state *mrb, mrb_gc *gc)
 {
   gc->sweeps = NULL;
-  gc->live_after_mark = gc->live;
   mrb_heap_page *prev = gc->sweeps;
-  mrb_heap_page *page = prev ? prev->next : gc->heaps;
+  mrb_heap_page *page = prev ? prev->next : gc->pages;
 
   while (page) {
     RVALUE *p = page->objects;
     RVALUE *e = p + MRB_HEAP_PAGE_SIZE;
-    size_t freed = 0;
-    mrb_bool dead_slot = TRUE;
+    mrb_bool dead_page = TRUE;
 
-    while (p<e) {
+    for (; p < e; p++) {
       if (is_dead(gc, &p->as.basic)) {
         if (p->as.basic.tt != MRB_TT_FREE) {
           obj_free(mrb, &p->as.basic, FALSE);
-          if (p->as.basic.tt == MRB_TT_FREE) {
-            p->as.free.next = page->freelist;
-            page->freelist = p;
-            freed++;
-          }
-          else {
-            dead_slot = FALSE;
-          }
+          p->as.free.next = page->freelist;
+          page->freelist = p;
         }
       }
       else {
-        paint_partial_white(gc, &p->as.basic); /* next gc target */
-        dead_slot = FALSE;
+        paint_white(&p->as.basic);
+        dead_page = FALSE;
       }
-      p++;
     }
-
-    /* free dead slot */
-    if (dead_slot && !page->region) {
+    
+    /* free dead page */
+    if (dead_page && !page->region) {
       mrb_heap_page *next = page->next;
-
       if (prev) prev->next = next;
-      if (gc->heaps == page)
-        gc->heaps = page->next;
-
+      if (gc->pages == page)
+        gc->pages = page->next;
       mrb_free(mrb, page);
       page = next;
     }
@@ -1154,25 +1119,23 @@ sweep_phase(mrb_state *mrb, mrb_gc *gc)
       prev = page;
       page = page->next;
     }
-    gc->live -= freed;
-    gc->live_after_mark -= freed;
   }
   gc->sweeps = prev;
 
   /* rebuild free_heaps link */
-  gc->free_heaps = NULL;
-  for (mrb_heap_page *p = gc->heaps; p; p=p->next) {
+  gc->free_pages = NULL;
+  for (mrb_heap_page *p = gc->pages; p; p=p->next) {
     if (p->freelist) {
-      p->free_next = gc->free_heaps;
-      gc->free_heaps = p;
+      p->free_next = gc->free_pages;
+      gc->free_pages = p;
     }
   }
 }
 
 static void run_gc(mrb_state *mrb, mrb_gc *gc)
 {
+  gc->live = 0;
   root_scan_phase(mrb, gc);
-  flip_white_part(gc);
   marking_phase(mrb, gc);
   final_marking_phase(mrb, gc);
   sweep_phase(mrb, gc);
@@ -1187,7 +1150,7 @@ mrb_full_gc(mrb_state *mrb)
   if (!mrb->c) return;
   if (gc->disabled || gc->iterating) return;
   run_gc(mrb, gc);
-  gc->threshold = (gc->live_after_mark/100) * gc->interval_ratio;
+  gc->threshold = (gc->live/100) * gc->interval_ratio;
 
 #ifdef MRB_USE_MALLOC_TRIM
   malloc_trim(0);
@@ -1260,6 +1223,12 @@ gc_disable(mrb_state *mrb, mrb_value obj)
   return mrb_bool_value(old);
 }
 
+static mrb_value
+gc_threshold_get(mrb_state *mrb, mrb_value obj)
+{
+  return mrb_int_value(mrb, mrb->gc.threshold);
+}
+
 /*
  *  call-seq:
  *     GC.interval_ratio      -> int
@@ -1299,7 +1268,7 @@ gc_each_objects(mrb_state *mrb, mrb_gc *gc, mrb_each_object_callback *callback, 
 {
   mrb_heap_page* page;
 
-  page = gc->heaps;
+  page = gc->pages;
   while (page != NULL) {
     RVALUE *p;
 
@@ -1364,6 +1333,7 @@ mrb_init_gc(mrb_state *mrb)
   mrb_define_class_method_id(mrb, gc, MRB_SYM(start), gc_start, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, gc, MRB_SYM(enable), gc_enable, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, gc, MRB_SYM(disable), gc_disable, MRB_ARGS_NONE());
+  mrb_define_class_method_id(mrb, gc, MRB_SYM(threshold), gc_threshold_get, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, gc, MRB_SYM(interval_ratio), gc_interval_ratio_get, MRB_ARGS_NONE());
   mrb_define_class_method_id(mrb, gc, MRB_SYM_E(interval_ratio), gc_interval_ratio_set, MRB_ARGS_REQ(1));
 }

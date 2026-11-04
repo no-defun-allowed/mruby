@@ -39,18 +39,16 @@ typedef enum {
 } mrb_gc_state;
 
 typedef struct mrb_gc {
-  struct mrb_heap_page *heaps;     /* all heaps pages */
-  struct mrb_heap_page *free_heaps;/* heaps for allocation */
+  struct mrb_heap_page *pages;     /* all pages */
+  struct mrb_heap_page *free_pages;/* pages for allocation */
   struct mrb_heap_page *sweeps;    /* page where sweep starts */
   struct mrb_heap_region *regions;  /* contiguous heap regions */
   struct RBasic *gray_stack[MRB_GRAY_STACK_SIZE]; /* stack of gray objects */
   size_t gray_stack_top;           /* top index of gray stack */
   mrb_bool gray_overflow:1;        /* gray stack overflowed; needs heap rescan */
   size_t live;                     /* count of live objects */
-  size_t live_after_mark;          /* old generation objects */
   size_t threshold;                /* threshold to start GC */
   int interval_ratio;
-  int current_white_part :2;       /* make white object by white_part */
   mrb_bool iterating     :1;       /* currently iterating over objects */
   mrb_bool disabled      :1;       /* GC disabled */
   mrb_bool out_of_memory :1;       /* out-of-memory error occurred */
