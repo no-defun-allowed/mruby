@@ -339,6 +339,7 @@ mrb_gc_add_region(mrb_state *mrb, void *start, size_t size)
 }
 
 #define DEFAULT_GC_INTERVAL_RATIO 150
+#define MINIMUM_GC_THRESHOLD 400
 
 void
 mrb_gc_init(mrb_state *mrb, mrb_gc *gc)
@@ -1139,6 +1140,9 @@ mrb_full_gc(mrb_state *mrb)
   if (gc->disabled || gc->iterating) return;
   run_gc(mrb, gc);
   gc->threshold = (gc->live/100) * gc->interval_ratio;
+  /* Don't set the threshold to something really small */
+  if (gc->threshold < MINIMUM_GC_THRESHOLD)
+    gc->threshold = MINIMUM_GC_THRESHOLD;
 
 #ifdef MRB_USE_MALLOC_TRIM
   malloc_trim(0);
