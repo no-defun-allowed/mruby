@@ -90,25 +90,6 @@ static const unsigned char base64_dec_tab[128] = {
    41,  42,  43,  44,  45,  46,  47,  48,  49,  50,  51, IGN, IGN, IGN, IGN, IGN,
 };
 
-/* lookup table for hex character to integer conversion */
-static const signed char hex_lookup[256] = {
-  /* 0x00-0x0F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x10-0x1F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x20-0x2F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x30-0x3F */  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1,
-  /* 0x40-0x4F */ -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x50-0x5F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x60-0x6F */ -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x70-0x7F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x80-0x8F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x90-0x9F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0xA0-0xAF */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0xB0-0xBF */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0xC0-0xCF */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0xD0-0xDF */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0xE0-0xEF */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0xF0-0xFF */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
-};
 /* byte index arrays for endianness optimization */
 static const int be_idx16[2] = {1, 0};          /* big-endian 16-bit: MSB, LSB */
 static const int le_idx16[2] = {0, 1};          /* little-endian 16-bit: LSB, MSB */
@@ -116,31 +97,17 @@ static const int be_idx32[4] = {3, 2, 1, 0};    /* big-endian 32-bit: MSB...LSB 
 static const int le_idx32[4] = {0, 1, 2, 3};    /* little-endian 32-bit: LSB...MSB */
 static const int be_idx64[8] = {7, 6, 5, 4, 3, 2, 1, 0};  /* big-endian 64-bit: MSB...LSB */
 static const int le_idx64[8] = {0, 1, 2, 3, 4, 5, 6, 7};  /* little-endian 64-bit: LSB...MSB */
-/* lookup tables for binary string optimization */
-/* Convert character to bit value (0 or 1) */
-static inline uint8_t char_to_bit(unsigned char c) {
-  switch (c) {
-    case '0': return 0;
-    case '1': return 1;
-    default: return 0;
-  }
-}
 
-static const char bit_to_char[2] = {'0', '1'};
+static inline uint8_t char_to_bit(unsigned char c) { return c == '1'; }
+static inline char bit_to_char(uint8_t b) { return '0' + b; }
 
 /* 8-bit batch processing functions for binary strings */
 static inline uint8_t
 pack_8_bits_msb(const char *src)
 {
   uint8_t result = 0;
-  result |= char_to_bit((uint8_t)src[0]) << 7;
-  result |= char_to_bit((uint8_t)src[1]) << 6;
-  result |= char_to_bit((uint8_t)src[2]) << 5;
-  result |= char_to_bit((uint8_t)src[3]) << 4;
-  result |= char_to_bit((uint8_t)src[4]) << 3;
-  result |= char_to_bit((uint8_t)src[5]) << 2;
-  result |= char_to_bit((uint8_t)src[6]) << 1;
-  result |= char_to_bit((uint8_t)src[7]);
+  for (int i = 0; i < 8; i++)
+    result |= char_to_bit((uint8_t)src[i]) << (7 - i);
   return result;
 }
 
@@ -148,41 +115,23 @@ static inline uint8_t
 pack_8_bits_lsb(const char *src)
 {
   uint8_t result = 0;
-  result |= char_to_bit((uint8_t)src[0]);
-  result |= char_to_bit((uint8_t)src[1]) << 1;
-  result |= char_to_bit((uint8_t)src[2]) << 2;
-  result |= char_to_bit((uint8_t)src[3]) << 3;
-  result |= char_to_bit((uint8_t)src[4]) << 4;
-  result |= char_to_bit((uint8_t)src[5]) << 5;
-  result |= char_to_bit((uint8_t)src[6]) << 6;
-  result |= char_to_bit((uint8_t)src[7]) << 7;
+  for (int i = 0; i < 8; i++)
+    result |= char_to_bit((uint8_t)src[i]) << i;
   return result;
 }
 
 static inline void
 unpack_8_bits_msb(uint8_t byte, char *dst)
 {
-  dst[0] = bit_to_char[(byte >> 7) & 1];
-  dst[1] = bit_to_char[(byte >> 6) & 1];
-  dst[2] = bit_to_char[(byte >> 5) & 1];
-  dst[3] = bit_to_char[(byte >> 4) & 1];
-  dst[4] = bit_to_char[(byte >> 3) & 1];
-  dst[5] = bit_to_char[(byte >> 2) & 1];
-  dst[6] = bit_to_char[(byte >> 1) & 1];
-  dst[7] = bit_to_char[byte & 1];
+  for (int i = 0; i < 8; i++)
+    dst[i] = bit_to_char((byte >> (7 - i)) & 1);
 }
 
 static inline void
 unpack_8_bits_lsb(uint8_t byte, char *dst)
 {
-  dst[0] = bit_to_char[byte & 1];
-  dst[1] = bit_to_char[(byte >> 1) & 1];
-  dst[2] = bit_to_char[(byte >> 2) & 1];
-  dst[3] = bit_to_char[(byte >> 3) & 1];
-  dst[4] = bit_to_char[(byte >> 4) & 1];
-  dst[5] = bit_to_char[(byte >> 5) & 1];
-  dst[6] = bit_to_char[(byte >> 6) & 1];
-  dst[7] = bit_to_char[(byte >> 7) & 1];
+  for (int i = 0; i < 8; i++)
+    dst[i] = bit_to_char((byte >> i) & 1);
 }
 
 /* character classification for string format optimization */
@@ -202,91 +151,8 @@ static inline uint8_t char_class(unsigned char c) {
     default: return 0;
   }
 }
-/* UTF-8 optimization lookup tables */
-/* UTF-8 sequence length lookup table for non-ASCII bytes (0x80-0xFF) */
-/* Index = byte_value - 0x80, so table[0] = info for byte 0x80 */
-static const uint8_t utf8_seq_len_high[128] = {
-  /* 0x80-0xBF: Invalid start bytes (continuation bytes) - return 0 for error */
-  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
 
-  /* 0xC0-0xDF: 2-byte sequences */
-  2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,
-
-  /* 0xE0-0xEF: 3-byte sequences */
-  3,3,3,3,3,3,3,3, 3,3,3,3,3,3,3,3,
-
-  /* 0xF0-0xF7: 4-byte sequences */
-  4,4,4,4,4,4,4,4,
-
-  /* 0xF8-0xFF: Invalid start bytes - return 0 for error */
-  0,0,0,0,0,0,0,0
-};
-
-/* Fast validation for UTF-8 continuation bytes (0x80-0xBF) */
-/* Index = byte_value - 0x80 */
-static const uint8_t utf8_is_continuation[128] = {
-  /* 0x80-0xBF: Valid continuation bytes */
-  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
-  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
-
-  /* 0xC0-0xFF: Invalid continuation bytes */
-  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0
-};
-
-/* Helper macro for continuation byte validation */
-#define IS_UTF8_CONTINUATION(byte) \
-  ((byte) >= 0x80 && utf8_is_continuation[(byte) - 0x80])
-
-/* Quoted-printable optimization lookup table */
-/* 0=literal, 1=encode, 2=special (newline) */
-static const uint8_t qprint_encode_type[256] = {
-  /* 0x00-0x1F: Control characters - encode */
-  1,1,1,1,1,1,1,1, 1,0,2,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
-  /*     \t \n                      */
-
-  /* 0x20-0x3F: Printable ASCII */
-  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,1,0,0,
-  /*                                                                 =   */
-
-  /* 0x40-0x5F: Printable ASCII */
-  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-
-  /* 0x60-0x7F: Printable ASCII */
-  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,1,
-  /*                                                                    DEL*/
-
-  /* 0x80-0xFF: High-bit characters - encode */
-  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
-  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
-  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
-  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1
-};
-
-/* UU-encoding optimization lookup tables */
-/* UU-encoding uses 6-bit values mapped to ASCII 32-95, but space (32) -> backtick (96) */
-static const char uu_encode_table[64] = {
-  '`', '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
-  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
-  '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
-  'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[', '\\', ']', '^', '_'
-};
-
-/* UU-decoding lookup table for ASCII 32-127 */
-static const int8_t uu_decode_table[96] = {
-  /* ASCII 32-47: ` ! " # $ % & ' ( ) * + , - . / */
-  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
-  /* ASCII 48-63: 0 1 2 3 4 5 6 7 8 9 : ; < = > ? */
-  16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
-  /* ASCII 64-79: @ A B C D E F G H I J K L M N O */
-  32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
-  /* ASCII 80-95: P Q R S T U V W X Y Z [ \ ] ^ _ */
-  48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
-  /* ASCII 96-127: ` a b c... (invalid for UU, but ` = 0 for decoding) */
-  0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
-};
+#define IS_UTF8_CONTINUATION(byte) ((byte) >> 6 == 0b10)
 
 /* template parsing optimization structures */
 typedef struct {
@@ -318,7 +184,9 @@ static inline format_info_t pack_format_info(unsigned char c) {
     /* I, i, J, j are handled specially based on sizeof() */
     case 'L': return (format_info_t){PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, 0};
     case 'l': return (format_info_t){PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, PACK_FLAG_SIGNED};
+#ifndef MRB_SMALLER
     case 'M': return (format_info_t){PACK_DIR_QENC, PACK_TYPE_STRING, 0, PACK_FLAG_WIDTH | PACK_FLAG_COUNT2};
+#endif
     case 'm': return (format_info_t){PACK_DIR_BASE64, PACK_TYPE_STRING, 0, PACK_FLAG_WIDTH | PACK_FLAG_COUNT2};
     case 'N': return (format_info_t){PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, PACK_FLAG_GT};
     case 'n': return (format_info_t){PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, PACK_FLAG_GT};
@@ -326,7 +194,9 @@ static inline format_info_t pack_format_info(unsigned char c) {
     case 'q': return (format_info_t){PACK_DIR_QUAD, PACK_TYPE_INTEGER, 8, PACK_FLAG_SIGNED};
     case 'S': return (format_info_t){PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, 0};
     case 's': return (format_info_t){PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, PACK_FLAG_SIGNED};
+#ifndef MRB_SMALLER
     case 'u': return (format_info_t){PACK_DIR_UU, PACK_TYPE_STRING, 0, PACK_FLAG_WIDTH | PACK_FLAG_COUNT2};
+#endif
     case 'U': return (format_info_t){PACK_DIR_UTF8, PACK_TYPE_INTEGER, 0, 0};
     case 'V': return (format_info_t){PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, PACK_FLAG_LT};
     case 'v': return (format_info_t){PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, PACK_FLAG_LT};
@@ -343,10 +213,19 @@ static inline format_info_t pack_format_info(unsigned char c) {
 #define IS_PADDING_CHAR_A(c) (char_class((unsigned char)(c)) & (CHAR_NULL | CHAR_SPACE))
 #define IS_PADDING_CHAR_Z(c) (char_class((unsigned char)(c)) & CHAR_NULL)
 
+static const signed char hex_lookup[64] = {
+  /* 0x30-0x3F */  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1,
+  /* 0x40-0x4F */ -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  /* 0x50-0x5F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  /* 0x60-0x6F */ -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+};
+
 static int
 hex2int(unsigned char ch)
 {
-  return hex_lookup[ch];
+  if (ch < 0x30) return -1;
+  if (0x68 < ch) return -1;
+  return hex_lookup[ch - 0x30];
 }
 
 static mrb_value
@@ -633,22 +512,6 @@ pack_BER(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, unsigned int 
     mrb_raise(mrb, E_ARGUMENT_ERROR, "can't compress negative numbers");
   }
 
-  /* fast path for 1-byte values (0-127) */
-  if (n < 128) {
-    str = str_len_ensure(mrb, str, sidx + 1);
-    RSTRING_PTR(str)[sidx] = (char)n;
-    return 1;
-  }
-
-  /* fast path for 2-byte values (128-16383) */
-  if (n < 16384) {
-    str = str_len_ensure(mrb, str, sidx + 2);
-    char *p = RSTRING_PTR(str) + sidx;
-    *p++ = (char)((n >> 7) | 0x80);
-    *p = (char)(n & 0x7f);
-    return 2;
-  }
-
   /* original algorithm for larger values */
   int i;
   for (i = 1; i < (int)sizeof(mrb_int) + 1; i++) {
@@ -810,7 +673,11 @@ pack_utf8(mrb_state *mrb, mrb_value o, mrb_value str, mrb_int sidx, int count, u
   return len;
 }
 
-
+/* Index = (byte_value - 0x80) / 8, so table[0] = info for byte 0x80 */
+static const uint8_t utf8_seq_len_high[16] = {
+  0, 0, 0, 0, 0, 0, 0, 0,
+  2, 2, 2, 2, 3, 3, 4, 0,
+};
 
 static int
 unpack_utf8(mrb_state *mrb, const unsigned char * src, mrb_int srclen, mrb_value ary, unsigned int flags)
@@ -829,7 +696,7 @@ unpack_utf8(mrb_state *mrb, const unsigned char * src, mrb_int srclen, mrb_value
   }
 
   /* Multi-byte UTF-8 with optimized lookup table */
-  uint8_t seq_len = utf8_seq_len_high[first_byte - 0x80];
+  uint8_t seq_len = utf8_seq_len_high[(first_byte - 0x80) / 8];
   if (seq_len == 0 || seq_len > srclen) {
     goto malformed;
   }
@@ -1336,6 +1203,32 @@ done:
   return (int)(sptr - sptr0);
 }
 
+#ifndef MRB_SMALLER
+/* Quoted-printable optimization lookup table */
+/* 0=literal, 1=encode, 2=special (newline) */
+static const uint8_t qprint_encode_type[256] = {
+  /* 0x00-0x1F: Control characters - encode */
+  1,1,1,1,1,1,1,1, 1,0,2,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
+  /*     \t \n                      */
+
+  /* 0x20-0x3F: Printable ASCII */
+  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,1,0,0,
+  /*                                                                 =   */
+
+  /* 0x40-0x5F: Printable ASCII */
+  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
+
+  /* 0x60-0x7F: Printable ASCII */
+  0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,1,
+  /*                                                                    DEL*/
+
+  /* 0x80-0xFF: High-bit characters - encode */
+  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
+  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
+  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
+  1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1
+};
+
 static int
 pack_qenc(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count)
 {
@@ -1467,6 +1360,31 @@ unpack_qenc(mrb_state *mrb, const void *src, mrb_int slen, mrb_value ary)
   mrb_ary_push(mrb, ary, buf);
   return (int)slen;
 }
+
+/* UU-encoding optimization lookup tables */
+/* UU-encoding uses 6-bit values mapped to ASCII 32-95, but space (32) -> backtick (96) */
+static const char uu_encode_table[64] = {
+  '`', '!', '"', '#', '$', '%', '&', '\'', '(', ')', '*', '+', ',', '-', '.', '/',
+  '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', ':', ';', '<', '=', '>', '?',
+  '@', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O',
+  'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '[', '\\', ']', '^', '_'
+};
+
+/* UU-decoding lookup table for ASCII 32-127 */
+static const int8_t uu_decode_table[96] = {
+  /* ASCII 32-47: ` ! " # $ % & ' ( ) * + , - . / */
+  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
+  /* ASCII 48-63: 0 1 2 3 4 5 6 7 8 9 : ; < = > ? */
+  16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31,
+  /* ASCII 64-79: @ A B C D E F G H I J K L M N O */
+  32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47,
+  /* ASCII 80-95: P Q R S T U V W X Y Z [ \ ] ^ _ */
+  48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+  /* ASCII 96-127: ` a b c... (invalid for UU, but ` = 0 for decoding) */
+  0, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
+};
+
 
 static int
 pack_uu(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count)
@@ -1616,6 +1534,7 @@ unpack_uu(mrb_state *mrb, const void *src, mrb_int slen, mrb_value ary)
   mrb_ary_push(mrb, ary, result);
   return (int)slen;
 }
+#endif
 
 static int
 pack_nul(mrb_state *mrb, mrb_value dst, mrb_int didx, int count)
@@ -1934,12 +1853,14 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
       case PACK_DIR_BASE64:
         ridx += pack_base64(mrb, o, result, ridx, (int)count);
         break;
+#ifndef MRB_SMALLER
       case PACK_DIR_UU:
         ridx += pack_uu(mrb, o, result, ridx, (int)count);
         break;
       case PACK_DIR_QENC:
         ridx += pack_qenc(mrb, o, result, ridx, (int)count);
         break;
+#endif
 
       /* UTF8 format - special signature (mrb, o, result, ridx, count, flags) */
       case PACK_DIR_UTF8:
@@ -2026,6 +1947,7 @@ pack_unpack(mrb_state *mrb, mrb_value str, mrb_bool single)
       srcidx += unpack_base64(mrb, sptr, srclen - srcidx, result);
       if (single) goto single_return;
       continue;
+#ifndef MRB_SMALLER
     case PACK_DIR_UU:
       srcidx += unpack_uu(mrb, sptr, srclen - srcidx, result);
       if (single) goto single_return;
@@ -2034,6 +1956,7 @@ pack_unpack(mrb_state *mrb, mrb_value str, mrb_bool single)
       srcidx += unpack_qenc(mrb, sptr, srclen - srcidx, result);
       if (single) goto single_return;
       continue;
+#endif
 
     default:
       break;
