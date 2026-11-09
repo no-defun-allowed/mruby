@@ -41,5 +41,5 @@ MRuby::CrossBuild.new('underworld') do |conf|
   conf.gem 'mrbgems/mruby-fiber/'
   conf.gem 'mrbgems/mruby-io/'
   conf.gem 'mrbgems/mruby-method/'
-  conf.gem 'mrbgems/mruby-pack/'
+  conf.gem 'mrbgems/mruby-mini-pack/'
 end
