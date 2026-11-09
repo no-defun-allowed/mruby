@@ -18,10 +18,6 @@
 #define INT_OVERFLOW_P(n)  ((n) < MRB_INT_MIN || (n) > MRB_INT_MAX)
 #define UINT_OVERFLOW_P(n) ((n) > MRB_INT_MAX)
 
-#ifndef EOF
-# define EOF (-1) /* for MRB_NO_STDIO */
-#endif
-
 struct tmpl {
   mrb_value str;
   int idx;
@@ -32,86 +28,48 @@ enum pack_dir {
   PACK_DIR_CHAR,      /* C */
   PACK_DIR_SHORT,     /* S */
   PACK_DIR_LONG,      /* L */
-  //PACK_DIR_INT,     /* i */
-  //PACK_DIR_VAX,
   PACK_DIR_STR,       /* A */
 };
 
 enum pack_type {
   PACK_TYPE_INTEGER,
-  PACK_TYPE_FLOAT,
   PACK_TYPE_STRING,
   PACK_TYPE_NONE
 };
 
-#define PACK_FLAG_a             0x00000002      /* null padding ("a") */
-#define PACK_FLAG_SIGNED        0x00000008      /* signed ("!") */
-#define PACK_FLAG_WIDTH         0x00000040      /* "count" is "width" */
-#define PACK_FLAG_LSB           0x00000080      /* LSB / low nibble first */
-#define PACK_FLAG_COUNT2        0x00000100      /* "count" is special... */
-#define PACK_FLAG_LITTLEENDIAN  0x00000200      /* little endian actually */
-
-/* byte index arrays for endianness optimization */
-static const int be_idx16[2] = {1, 0};          /* big-endian 16-bit: MSB, LSB */
-static const int le_idx16[2] = {0, 1};          /* little-endian 16-bit: LSB, MSB */
-static const int be_idx32[4] = {3, 2, 1, 0};    /* big-endian 32-bit: MSB...LSB */
-static const int le_idx32[4] = {0, 1, 2, 3};    /* little-endian 32-bit: LSB...MSB */
-static const int be_idx64[8] = {7, 6, 5, 4, 3, 2, 1, 0};  /* big-endian 64-bit: MSB...LSB */
-static const int le_idx64[8] = {0, 1, 2, 3, 4, 5, 6, 7};  /* little-endian 64-bit: LSB...MSB */
-
-/* character classification for string format optimization */
-#define CHAR_NULL    0x01
-#define CHAR_SPACE   0x02
-
-/* Character classification function */
-static inline uint8_t char_class(unsigned char c) {
-  switch (c) {
-    case '\0': return CHAR_NULL;
-    case ' ':
-    case '\t':
-    case '\n':
-    case '\v':
-    case '\f':
-    case '\r': return CHAR_SPACE;
-    default: return 0;
-  }
-}
-
-#define IS_UTF8_CONTINUATION(byte) ((byte) >> 6 == 0b10)
+#define PACK_FLAG_a             0x01      /* null padding ("a") */
+#define PACK_FLAG_SIGNED        0x02      /* signed ("!") */
+#define PACK_FLAG_WIDTH         0x04      /* "count" is "width" */
+#define PACK_FLAG_LSB           0x08      /* LSB / low nibble first */
+#define PACK_FLAG_COUNT2        0x10      /* "count" is special... */
+#define PACK_FLAG_LITTLEENDIAN  0x20      /* little endian actually */
 
 /* template parsing optimization structures */
 typedef struct {
-  enum pack_dir dir;
-  enum pack_type type;
-  int size;
-  unsigned int base_flags;
+  unsigned char dir;
+  unsigned char type;
+  unsigned char size;
+  unsigned char base_flags;
 } format_info_t;
+
+static char format_names[] = {'A','a','C','c','N','n','V','v'};
+static format_info_t format_infos[] = {
+  {PACK_DIR_STR, PACK_TYPE_STRING, 0, PACK_FLAG_WIDTH | PACK_FLAG_COUNT2},
+  {PACK_DIR_STR, PACK_TYPE_STRING, 0, PACK_FLAG_WIDTH | PACK_FLAG_COUNT2 | PACK_FLAG_a},
+  {PACK_DIR_CHAR, PACK_TYPE_INTEGER, 1, 0},
+  {PACK_DIR_CHAR, PACK_TYPE_INTEGER, 1, PACK_FLAG_SIGNED},
+  {PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, 0},
+  {PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, 0},
+  {PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, PACK_FLAG_LITTLEENDIAN},
+  {PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, PACK_FLAG_LITTLEENDIAN},
+};
 
 /* Format character lookup function */
 static inline format_info_t pack_format_info(unsigned char c) {
-  switch (c) {
-  case 'A': return (format_info_t){PACK_DIR_STR, PACK_TYPE_STRING, 0, PACK_FLAG_WIDTH | PACK_FLAG_COUNT2};
-  case 'a': return (format_info_t){PACK_DIR_STR, PACK_TYPE_STRING, 0, PACK_FLAG_WIDTH | PACK_FLAG_COUNT2 | PACK_FLAG_a};
-  case 'C': return (format_info_t){PACK_DIR_CHAR, PACK_TYPE_INTEGER, 1, 0};
-  case 'c': return (format_info_t){PACK_DIR_CHAR, PACK_TYPE_INTEGER, 1, PACK_FLAG_SIGNED};
-  case 'N': return (format_info_t){PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, 0};
-  case 'n': return (format_info_t){PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, 0};
-  case 'V': return (format_info_t){PACK_DIR_LONG, PACK_TYPE_INTEGER, 4, PACK_FLAG_LITTLEENDIAN};
-  case 'v': return (format_info_t){PACK_DIR_SHORT, PACK_TYPE_INTEGER, 2, PACK_FLAG_LITTLEENDIAN};
-  default: return (format_info_t){PACK_DIR_NONE, PACK_TYPE_NONE, 0, 0};
-  }
+  char *p = memchr(format_names, c, sizeof(format_names));
+  if (p) return format_infos[p - format_names];
+  else return (format_info_t){PACK_DIR_NONE, PACK_TYPE_NONE, 0, 0};
 }
-
-
-#define IS_PADDING_CHAR_A(c) (char_class((unsigned char)(c)) & (CHAR_NULL | CHAR_SPACE))
-#define IS_PADDING_CHAR_Z(c) (char_class((unsigned char)(c)) & CHAR_NULL)
-
-static const signed char hex_lookup[64] = {
-  /* 0x30-0x3F */  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, -1, -1, -1, -1, -1, -1,
-  /* 0x40-0x4F */ -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x50-0x5F */ -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-  /* 0x60-0x6F */ -1, 10, 11, 12, 13, 14, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-};
 
 static mrb_value
 str_len_ensure(mrb_state *mrb, mrb_value str, mrb_int len)
@@ -272,6 +230,19 @@ pack_str(mrb_state *mrb, mrb_value src, mrb_value dst, mrb_int didx, int count, 
   }\
 } while (0)
 
+static inline mrb_bool is_padding_char_a(unsigned char c) {
+  switch (c) {
+  case '\0':
+  case ' ':
+  case '\t':
+  case '\n':
+  case '\v':
+  case '\f':
+  case '\r': return 1;
+  default: return 0;
+  }
+}
+
 static int
 unpack_str(mrb_state *mrb, const void *src, mrb_int slen, mrb_value ary, int count, unsigned int flags)
 {
@@ -286,8 +257,7 @@ unpack_str(mrb_state *mrb, const void *src, mrb_int slen, mrb_value ary, int cou
   copylen = (int)slen;
 
   if (!(flags & PACK_FLAG_a)) {  /* "A" format - trim spaces and nulls */
-    /* optimized reverse trimming using lookup table */
-    while (copylen > 0 && IS_PADDING_CHAR_A(sptr[copylen - 1])) {
+    while (copylen > 0 && is_padding_char_a(sptr[copylen - 1])) {
       copylen--;
     }
   }
@@ -338,8 +308,6 @@ read_tmpl(mrb_state *mrb, struct tmpl *tmpl, enum pack_type *typep, mrb_int *siz
  restart:
   if (tmpl->idx >= tlen) return PACK_DIR_NONE;
   t = tptr[tmpl->idx++];
- alias:
-
   /* Handle whitespace - skip and restart */
   if (ISSPACE((char)t)) {
     goto restart;
@@ -375,10 +343,7 @@ read_tmpl(mrb_state *mrb, struct tmpl *tmpl, enum pack_type *typep, mrb_int *siz
       continue;
     }
     else if (ch == '*') {
-      if (type == PACK_TYPE_NONE)
-        count = 0;
-      else
-        count = -1;
+      count = -1;
     }
     else if (ch == '!') {
       flags |= PACK_FLAG_SIGNED;
@@ -465,7 +430,6 @@ mrb_pack_pack(mrb_state *mrb, mrb_value ary)
         o = mrb_ensure_int_type(mrb, o);
         pack_int(mrb, o, result, ridx, size, flags);
         ridx += size;
-        //pack_long(mrb, o, result, ridx, flags);
       }
       else if (type == PACK_TYPE_STRING) {
         if (!mrb_string_p(o)) {
